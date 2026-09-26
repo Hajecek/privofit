@@ -908,7 +908,7 @@ final class AuthService
         }
         $secret = Crypto::decrypt($row['secret_encrypted']);
         $totp = TOTP::createFromSecret($secret);
-        if (!$totp->verify($code, null, 1)) {
+        if (!$this->totpCodeMatches($totp, $code)) {
             throw new HttpException(400, 'Neplatný ověřovací kód.');
         }
         $this->db->update('totp_secrets', ['confirmed_at' => Clock::utc()], 'id = :id', ['id' => (int) $row['id']]);
@@ -1078,8 +1078,32 @@ final class AuthService
         if (!$row) {
             return false;
         }
-        $totp = TOTP::createFromSecret(Crypto::decrypt($row['secret_encrypted']));
-        return $totp->verify($code, null, 1);
+        try {
+            $totp = TOTP::createFromSecret(Crypto::decrypt($row['secret_encrypted']));
+        } catch (\Throwable) {
+            return false;
+        }
+        return $this->totpCodeMatches($totp, $code);
+    }
+
+    private function totpCodeMatches(TOTP $totp, string $code): bool
+    {
+        $digits = preg_replace('/\D+/', '', $code) ?? '';
+        if (strlen($digits) !== $totp->getDigits()) {
+            return false;
+        }
+        $period = $totp->getPeriod();
+        $now = time();
+        for ($step = -4; $step <= 4; $step++) {
+            $at = $now + ($step * $period);
+            if ($at < 0) {
+                continue;
+            }
+            if ($totp->verify($digits, $at)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private function mfaTrustCookie(): string
@@ -1174,7 +1198,7 @@ final class AuthService
     {
         $row = $this->db->fetch(
             'SELECT * FROM recovery_codes WHERE user_id = :id AND used_at IS NULL AND code_hash = :h',
-            ['id' => (int) $user['id'], 'h' => Crypto::hash(strtoupper(trim($code)))]
+            ['id' => (int) $user['id'], 'h' => Crypto::hash(strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $code) ?? ''))]
         );
         if (!$row) {
             return false;

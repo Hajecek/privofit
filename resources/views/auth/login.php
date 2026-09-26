@@ -58,7 +58,7 @@
                         <input type="hidden" name="password" value="">
                         <input type="hidden" name="remember" value="<?= !empty($remember) ? '1' : '' ?>">
                         <label>Kód z aplikace
-                            <input name="totp" inputmode="numeric" autocomplete="one-time-code" required placeholder="123456">
+                            <input name="totp" inputmode="numeric" autocomplete="off" required placeholder="123456" maxlength="8">
                         </label>
                         <input id="password" type="hidden" value="">
                         <small id="password-hint" hidden></small>

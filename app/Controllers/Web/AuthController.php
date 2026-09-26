@@ -85,14 +85,7 @@ final class AuthController extends Controller
         } catch (MfaRequiredException $e) {
             Session::set('mfa_pending_user_id', (int) $e->user['id']);
             Session::set('mfa_pending_remember', (bool) $request->input('remember'));
-            $this->view('auth/login', [
-                'title' => 'Ověření přihlášení | PRIVOFIT',
-                'page' => 'login',
-                'bodyClass' => 'standalone-login',
-                'mfa' => true,
-                'email' => $e->user['email'],
-                'remember' => (bool) $request->input('remember'),
-            ], 'layouts/brand');
+            $this->showMfaChallenge($e->user, (bool) $request->input('remember'));
         } catch (MfaSetupRequiredException) {
             $this->redirect('/user/zabezpeceni/mfa');
         } catch (HttpException $e) {
@@ -157,14 +150,7 @@ final class AuthController extends Controller
             }
             Session::set('mfa_pending_user_id', (int) $e->user['id']);
             Session::set('mfa_pending_remember', false);
-            $this->view('auth/login', [
-                'title' => 'Ověření přihlášení | PRIVOFIT',
-                'page' => 'login',
-                'bodyClass' => 'standalone-login',
-                'mfa' => true,
-                'email' => $e->user['email'],
-                'remember' => false,
-            ], 'layouts/brand');
+            $this->showMfaChallenge($e->user, false);
         } catch (HttpException $e) {
             if ($mobile) {
                 $this->redirectMobileError($e->getMessage());
@@ -226,20 +212,26 @@ final class AuthController extends Controller
         } catch (MfaRequiredException $e) {
             Session::set('mfa_pending_user_id', (int) $e->user['id']);
             Session::set('mfa_pending_remember', false);
-            $this->view('auth/login', [
-                'title' => 'Ověření přihlášení | PRIVOFIT',
-                'page' => 'login',
-                'bodyClass' => 'standalone-login',
-                'mfa' => true,
-                'email' => $e->user['email'],
-                'remember' => false,
-            ], 'layouts/brand');
+            $this->showMfaChallenge($e->user, false);
         } catch (HttpException $e) {
             $this->flashError($e->getMessage());
             $this->redirect('/prihlaseni');
         }
         $intended = Session::pull('intended', '/user');
         $this->redirect(is_string($intended) ? $intended : '/user');
+    }
+
+    /** @param array<string, mixed> $user */
+    private function showMfaChallenge(array $user, bool $remember): never
+    {
+        $this->view('auth/login', [
+            'title' => 'Ověření přihlášení | PRIVOFIT',
+            'page' => 'login',
+            'bodyClass' => 'standalone-login',
+            'mfa' => true,
+            'email' => $user['email'] ?? '',
+            'remember' => $remember,
+        ], 'layouts/brand');
     }
 
     public function signedOut(): never

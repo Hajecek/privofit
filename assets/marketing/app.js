@@ -316,7 +316,9 @@ if (isLogin || isRegister) {
         ? step < lastStep
           ? "Pokračovat"
           : "Vytvořit účet"
-        : "Přihlásit se") + " <span>↗</span>";
+        : isMfa
+          ? "Ověřit"
+          : "Přihlásit se") + " <span>↗</span>";
     const demoNote = form.querySelector(".demo-note");
     if (demoNote) demoNote.hidden = isRegister && fields[step] !== security;
     if (status && !status.dataset.keep) status.hidden = true;
@@ -381,7 +383,16 @@ if (isLogin || isRegister) {
       reveal ? "Skrýt heslo" : "Zobrazit heslo",
     );
   });
+  const totpInput = form.querySelector('[name="totp"]');
+  if (totpInput) {
+    totpInput.addEventListener("input", () => {
+      const digits = totpInput.value.replace(/\D/g, "").slice(0, 6);
+      if (totpInput.value !== digits) totpInput.value = digits;
+    });
+  }
   form.addEventListener("submit", (e) => {
+    if (isLogin && security) security.disabled = false;
+    if (totpInput) totpInput.value = totpInput.value.replace(/\D/g, "").slice(0, 6);
     if (!validateCurrent()) {
       e.preventDefault();
       return;
