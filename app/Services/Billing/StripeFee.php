@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Services\Billing;
 
 /**
- * Navýší cenu o poplatek ověřený na účtu Stripe: 3,15 % + 6,50 Kč.
- * Po stržení poplatku zůstane celá cena vstupu.
+ * Navýší cenu o poplatek, který Stripe z dané karty opravdu strhne.
+ * Evropská karta 1,5 % + 6,50 Kč, britská 2,5 % + 6,50 Kč, ostatní 3,15 % + 6,50 Kč.
  *
  * @phpstan-type Quote array{net:string,fee:string,charge:string,netMinor:int,feeMinor:int,chargeMinor:int}
  */
@@ -14,7 +14,7 @@ final class StripeFee
 {
     public static function basisPoints(): int
     {
-        $percent = (float) env_value('STRIPE_FEE_PERCENT', '3.15');
+        $percent = (float) env_value('STRIPE_FEE_PERCENT', '1.5');
         $bps = (int) round($percent * 100);
         return max(0, min(9999, $bps));
     }
@@ -35,13 +35,46 @@ final class StripeFee
     }
 
     /**
+     * Sazba podle země karty. Prázdná země = evropská, tu strhává český Apple Pay.
+     *
+     * @return array{0:int,1:int}
+     */
+    public static function rateForCountry(string $country): array
+    {
+        $country = strtoupper(trim($country));
+        $eea = [
+            'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR',
+            'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK',
+            'SI', 'ES', 'SE', 'IS', 'LI', 'NO',
+        ];
+        if ($country === '' || in_array($country, $eea, true)) {
+            return [self::basisPoints(), self::fixedMinor()];
+        }
+        if ($country === 'GB' || $country === 'UK') {
+            return [250, self::fixedMinor()];
+        }
+        return [315, self::fixedMinor()];
+    }
+
+    /** @return Quote */
+    public static function coverFor(string|float|int $netAmount, string $country = ''): array
+    {
+        [$bps, $fixed] = self::rateForCountry($country);
+        return self::coverWith($netAmount, $bps, $fixed);
+    }
+
+    /**
      * @return Quote
      */
     public static function cover(string|float|int $netAmount): array
     {
+        return self::coverFor($netAmount, '');
+    }
+
+    /** @return Quote */
+    private static function coverWith(string|float|int $netAmount, int $bps, int $fixed): array
+    {
         $netMinor = max(0, (int) round(((float) $netAmount) * 100));
-        $bps = self::basisPoints();
-        $fixed = self::fixedMinor();
         if ($netMinor === 0 || ($bps === 0 && $fixed === 0)) {
             return self::pack($netMinor, 0);
         }

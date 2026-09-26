@@ -195,12 +195,22 @@ final class AdminController extends Controller
         $todayEnd = Clock::toUtc(Clock::nowLocal()->setTime(0, 0)->modify('+1 day'))->format('Y-m-d H:i:s');
 
         $sql = "SELECT r.public_id, r.starts_at, r.ends_at, r.buffer_minutes, r.status, r.guest_count, r.price,
-                       r.cancellation_reason,
+                       r.cancellation_reason, r.membership_id,
                        u.first_name, u.last_name, u.username, u.email, u.public_id AS user_public_id,
-                       rm.name AS room_name
+                       rm.name AS room_name,
+                       p.id AS payment_id, p.provider AS payment_provider, p.status AS payment_status,
+                       p.amount AS payment_amount, p.fee_amount, p.charged_amount, p.stripe_details,
+                       p.provider_reference
                 FROM reservations r
                 LEFT JOIN users u ON u.id = r.user_id
                 LEFT JOIN rooms rm ON rm.id = r.room_id
+                LEFT JOIN payments p ON p.id = (
+                    SELECT p2.id FROM payments p2
+                    WHERE p2.reservation_id = r.id
+                       OR (p2.metadata_json IS NOT NULL AND p2.metadata_json LIKE CONCAT('%', r.public_id, '%'))
+                    ORDER BY p2.id DESC
+                    LIMIT 1
+                )
                 WHERE r.status <> 'expired'";
         $params = [];
         if ($filter === 'nadchazejici') {
@@ -227,6 +237,31 @@ final class AdminController extends Controller
             default => ' ORDER BY r.starts_at DESC',
         };
         $sql .= ' LIMIT 200';
+        $rows = $db->fetchAll($sql, $params);
+        $stubs = [];
+        foreach ($rows as $row) {
+            if (($row['payment_provider'] ?? '') !== 'stripe' || empty($row['payment_id'])) {
+                continue;
+            }
+            $stubs[] = [
+                'id' => (int) $row['payment_id'],
+                'provider' => 'stripe',
+                'provider_reference' => (string) ($row['provider_reference'] ?? ''),
+                'stripe_details' => $row['stripe_details'] ?? null,
+            ];
+        }
+        if ($stubs !== []) {
+            $filled = [];
+            foreach ((new PaymentService($db))->withStripeFacts($stubs) as $payment) {
+                $filled[(int) $payment['id']] = $payment['stripe_details'] ?? null;
+            }
+            foreach ($rows as $index => $row) {
+                $paymentId = (int) ($row['payment_id'] ?? 0);
+                if ($paymentId && !empty($filled[$paymentId])) {
+                    $rows[$index]['stripe_details'] = $filled[$paymentId];
+                }
+            }
+        }
 
         $counts = $db->fetch(
             "SELECT
@@ -240,11 +275,11 @@ final class AdminController extends Controller
 
         $this->view('admin/reservations', [
             'title' => 'Rezervace',
-            'rows' => $db->fetchAll($sql, $params),
+            'rows' => $rows,
             'filter' => $filter,
             'q' => $q,
             'counts' => $counts,
-            'pageScripts' => ['js/customers.js'],
+            'pageScripts' => ['js/customers.js', 'js/payment-detail.js'],
         ]);
     }
 
@@ -664,6 +699,7 @@ final class AdminController extends Controller
              LIMIT 500",
             ['from' => $period['from'], 'to' => $period['to']]
         );
+        $payments = (new PaymentService($db))->withStripeFacts($payments);
 
         $total = 0.0;
         $reservationTotal = 0.0;

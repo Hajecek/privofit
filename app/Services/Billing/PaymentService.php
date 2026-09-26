@@ -6,6 +6,7 @@ namespace App\Services\Billing;
 
 use App\Core\Crypto;
 use App\Core\Database;
+use App\Core\Logger;
 use App\Support\Clock;
 
 /**
@@ -90,6 +91,69 @@ final class PaymentService
     public function findByPublicId(string $publicId): ?array
     {
         return $this->db->fetch('SELECT * FROM payments WHERE public_id = :pid', ['pid' => $publicId]);
+    }
+
+    /** @param array<string, mixed> $facts */
+    public function rememberStripeFacts(int $paymentId, array $facts): void
+    {
+        if ($facts === []) {
+            return;
+        }
+        $this->db->update('payments', [
+            'stripe_details' => json_encode($facts, JSON_UNESCAPED_UNICODE),
+            'updated_at' => Clock::utc(),
+        ], 'id = :id', ['id' => $paymentId]);
+    }
+
+    public function captureStripeFacts(int $paymentId, string $reference): void
+    {
+        try {
+            $current = $this->db->fetch('SELECT stripe_details, provider FROM payments WHERE id = :id', ['id' => $paymentId]);
+            if (!$current || ($current['provider'] ?? '') !== 'stripe' || trim((string) ($current['stripe_details'] ?? '')) !== '') {
+                return;
+            }
+            $reference = trim($reference);
+            if ($reference === '') {
+                return;
+            }
+            $facts = StripeGateway::fromConfig()->paymentFacts($reference);
+            $this->rememberStripeFacts($paymentId, $facts);
+        } catch (\Throwable $e) {
+            if (str_contains($e->getMessage(), 'No such')) {
+                $this->rememberStripeFacts($paymentId, ['missing' => true]);
+                return;
+            }
+            Logger::error('Detail platby ze Stripe se nepodařilo uložit', ['error' => $e->getMessage()]);
+        }
+    }
+
+    /** @param list<array<string, mixed>> $payments @return list<array<string, mixed>> */
+    public function withStripeFacts(array $payments): array
+    {
+        $fetched = 0;
+        foreach ($payments as $index => $payment) {
+            if ($fetched >= 20) {
+                break;
+            }
+            if (($payment['provider'] ?? '') !== 'stripe' || trim((string) ($payment['stripe_details'] ?? '')) !== '') {
+                continue;
+            }
+            $reference = trim((string) ($payment['provider_reference'] ?? ''));
+            if ($reference === '' || empty($payment['id'])) {
+                continue;
+            }
+            $fetched++;
+            try {
+                $this->captureStripeFacts((int) $payment['id'], $reference);
+                $fresh = $this->db->fetch('SELECT stripe_details FROM payments WHERE id = :id', ['id' => (int) $payment['id']]);
+                if ($fresh && trim((string) ($fresh['stripe_details'] ?? '')) !== '') {
+                    $payments[$index]['stripe_details'] = $fresh['stripe_details'];
+                }
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+        return $payments;
     }
 
     public function markPaid(int $paymentId, string $reference, string $idempotencyKey): void

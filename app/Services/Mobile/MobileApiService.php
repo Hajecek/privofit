@@ -321,7 +321,7 @@ final class MobileApiService
             $this->reservations->releasePendingForSlots($user, $slotIds);
             $holds = $this->reservations->createFromSlotIds($user, $slotIds, true, [], $bookedGuests);
 
-            $settlement = $this->settleCheckout($user, $unit, $count, $charge, $requestId, $applePay, $holds);
+            $settlement = $this->settleCheckout($user, $unit, $count, $net, $requestId, $applePay, $holds);
             if ($settlement['provider'] === 'membership') {
                 $membership = $this->memberships->activeForUser((int) $user['id']);
                 $membershipId = $membership ? (int) $membership['id'] : null;
@@ -340,7 +340,7 @@ final class MobileApiService
                 $confirmed[] = $this->reservations->confirmPending($hold, $user);
             }
             $firstId = isset($confirmed[0]['id']) ? (int) $confirmed[0]['id'] : null;
-            $this->insertPayment([
+            $paymentId = $this->insertPayment([
                 'public_id' => Crypto::uuid(),
                 'client_request_id' => $requestId !== '' ? $requestId : null,
                 'user_id' => (int) $user['id'],
@@ -348,8 +348,8 @@ final class MobileApiService
                 'provider' => $settlement['provider'],
                 'provider_reference' => $settlement['reference'],
                 'amount' => $settlement['provider'] === 'stripe' ? $net : $charge,
-                'fee_amount' => $settlement['provider'] === 'stripe' ? $fee : '0.00',
-                'charged_amount' => $charge,
+                'fee_amount' => $settlement['provider'] === 'stripe' ? (string) ($settlement['fee'] ?? $fee) : '0.00',
+                'charged_amount' => (string) ($settlement['charged'] ?? $charge),
                 'currency' => 'CZK',
                 'status' => 'paid',
                 'metadata_json' => json_encode([
@@ -363,6 +363,9 @@ final class MobileApiService
                 'created_at' => Clock::utc(),
                 'updated_at' => Clock::utc(),
             ]);
+            if ($settlement['provider'] === 'stripe' && is_string($settlement['reference']) && $settlement['reference'] !== '') {
+                $this->payments->captureStripeFacts($paymentId, $settlement['reference']);
+            }
             $payload = [
                 'id' => $requestId !== '' ? $requestId : ($confirmed[0]['public_id'] ?? Crypto::uuid()),
                 'status' => 'paid',
@@ -667,9 +670,9 @@ final class MobileApiService
 
     /**
      * @param list<array<string, mixed>> $holds
-     * @return array{provider:string,reference:?string}
+     * @return array{provider:string,reference:?string,fee:string,charged:string}
      */
-    private function settleCheckout(array $user, float $unit, int $count, string $total, string $requestId, array $applePay, array $holds = []): array
+    private function settleCheckout(array $user, float $unit, int $count, string $net, string $requestId, array $applePay, array $holds = []): array
     {
         if ($unit <= 0) {
             $membership = $this->memberships->activeForUser((int) $user['id']);
@@ -678,10 +681,10 @@ final class MobileApiService
                     $this->memberships->consumeEntry((int) $membership['id'], (int) $user['id']);
                 }
             }
-            return ['provider' => 'membership', 'reference' => null];
+            return ['provider' => 'membership', 'reference' => null, 'fee' => '0.00', 'charged' => '0.00'];
         }
 
-        $amountMinor = (int) round(((float) $total) * 100);
+        $netMinor = (int) round(((float) $net) * 100);
         $key = trim((string) env_value('STRIPE_SECRET_KEY', ''));
         if ($key === '' || !str_starts_with($key, 'sk_')) {
             throw new HttpException(503, 'Stripe není nakonfigurovaný.');
@@ -700,12 +703,12 @@ final class MobileApiService
         ];
 
         if ($paymentData !== null) {
-            $charge = $gateway->chargeApplePay($paymentData, $amountMinor, 'czk', $requestId, $description, $meta);
-            return ['provider' => 'stripe', 'reference' => $charge['id']];
+            $charge = $gateway->chargeApplePay($paymentData, $netMinor, 'czk', $requestId, $description, $meta);
+            return ['provider' => 'stripe', 'reference' => $charge['id'], 'fee' => $charge['fee'], 'charged' => $charge['charge']];
         }
         if (str_starts_with($key, 'sk_test_')) {
-            $charge = $gateway->chargeTestCard($amountMinor, 'czk', $requestId, $description . ' (test)', $meta);
-            return ['provider' => 'stripe', 'reference' => $charge['id']];
+            $charge = $gateway->chargeTestCard($netMinor, 'czk', $requestId, $description . ' (test)', $meta);
+            return ['provider' => 'stripe', 'reference' => $charge['id'], 'fee' => $charge['fee'], 'charged' => $charge['charge']];
         }
 
         throw new HttpException(422, 'Chybí Apple Pay token.');
@@ -765,6 +768,7 @@ final class MobileApiService
         $this->trySql('ALTER TABLE payments ADD COLUMN metadata_json MEDIUMTEXT DEFAULT NULL AFTER status');
         $this->trySql('ALTER TABLE payments ADD COLUMN fee_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER amount');
         $this->trySql('ALTER TABLE payments ADD COLUMN charged_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER fee_amount');
+        $this->trySql('ALTER TABLE payments ADD COLUMN stripe_details MEDIUMTEXT DEFAULT NULL AFTER metadata_json');
     }
 
     private function trySql(string $sql): void

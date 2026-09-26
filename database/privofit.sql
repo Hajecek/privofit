@@ -427,6 +427,7 @@ CREATE TABLE IF NOT EXISTS payments (
     amount DECIMAL(12,2) NOT NULL,
     fee_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
     charged_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    stripe_details MEDIUMTEXT DEFAULT NULL,
     currency CHAR(3) NOT NULL DEFAULT 'CZK',
     status ENUM('pending', 'authorized', 'paid', 'failed', 'refunded', 'cancelled') NOT NULL DEFAULT 'pending',
     paid_at DATETIME DEFAULT NULL,

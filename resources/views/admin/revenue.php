@@ -166,6 +166,8 @@ $tabs = [
                         <th>Typ</th>
                         <th>Částka</th>
                         <th>Poskytovatel</th>
+                        <th>Platba</th>
+                        <th>Stav</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -203,7 +205,7 @@ $tabs = [
                                 <div class="muted">zákazník <?= e(number_format((float) ($payment['charged_amount'] ?? 0), 2, ',', ' ')) ?> Kč</div>
                             <?php endif; ?>
                         </td>
-                        <td class="muted"><?= e((string) ($payment['provider'] ?? '—')) ?></td>
+                        <?php $factsMode = 'columns'; include __DIR__ . '/_payment_facts.php'; ?>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>

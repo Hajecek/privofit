@@ -165,6 +165,11 @@ final class CheckoutService
         }
         $eventKey = 'stripe:' . ((string) ($session['id'] ?? $reference));
         $this->payments->markPaid((int) $payment['id'], $reference !== '' ? $reference : (string) $session['id'], $eventKey);
+        $stripeRef = (string) ($session['id'] ?? '');
+        if ($stripeRef === '') {
+            $stripeRef = $reference;
+        }
+        $this->payments->captureStripeFacts((int) $payment['id'], $stripeRef);
         if (!empty($payment['membership_id'])) {
             (new MembershipService($this->db))->activatePurchase((int) $payment['membership_id']);
         }

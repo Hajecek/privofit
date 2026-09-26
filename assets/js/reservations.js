@@ -57,7 +57,7 @@
   const hourlyTwo = () => Number(state.availability.hourly_price_two || 200);
   const rate = () => (state.guests >= 2 ? hourlyTwo() : hourly());
   const buffer = () => Number(state.availability.buffer_minutes || 15);
-  const feeBps = Number(payload.stripeFee?.basisPoints ?? 315);
+  const feeBps = Number(payload.stripeFee?.basisPoints ?? 150);
   const feeFixedMinor = Number(payload.stripeFee?.fixedMinor ?? 650);
   const processorFee = (amountMinor) => {
     const product = amountMinor * feeBps;

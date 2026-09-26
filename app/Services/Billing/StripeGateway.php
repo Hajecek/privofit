@@ -147,23 +147,32 @@ final class StripeGateway
      * @return array{id:string,status:string}
      */
     /**
+     * Částka je čistá cena vstupu. Poplatek se vezme podle země karty v Apple Pay.
+     *
      * @param array<string, string> $metadata
-     * @return array{id:string,status:string}
+     * @return array{id:string,status:string,fee:string,charge:string,net:string}
      */
-    public function chargeApplePay(string $paymentDataJson, int $amountMinor, string $currency, string $idempotencyKey, string $description, array $metadata = []): array
+    public function chargeApplePay(string $paymentDataJson, int $netMinor, string $currency, string $idempotencyKey, string $description, array $metadata = []): array
     {
-        $this->assertAmount($amountMinor);
+        $this->assertAmount($netMinor);
         $token = $this->createApplePayToken($paymentDataJson, $idempotencyKey . ':token');
-        return $this->confirmIntent([
-            'amount' => (string) $amountMinor,
+        $card = is_array($token['card'] ?? null) ? $token['card'] : [];
+        $priced = StripeFee::coverFor(number_format($netMinor / 100, 2, '.', ''), (string) ($card['country'] ?? ''));
+        $intent = $this->confirmIntent([
+            'amount' => (string) $priced['chargeMinor'],
             'currency' => strtolower($currency),
             'confirm' => 'true',
             'off_session' => 'true',
             'confirmation_method' => 'automatic',
             'description' => $description,
             'payment_method_data[type]' => 'card',
-            'payment_method_data[card][token]' => $token,
+            'payment_method_data[card][token]' => (string) ($token['id'] ?? ''),
         ] + $this->metadataFields($metadata), $idempotencyKey . ':pi');
+        return $intent + [
+            'fee' => $priced['fee'],
+            'charge' => $priced['charge'],
+            'net' => $priced['net'],
+        ];
     }
 
     /**
@@ -173,17 +182,20 @@ final class StripeGateway
      * @return array{id:string,status:string}
      */
     /**
+     * Testovací karta Stripe je zahraniční, proto sazba 3,15 % + 6,50 Kč.
+     *
      * @param array<string, string> $metadata
-     * @return array{id:string,status:string}
+     * @return array{id:string,status:string,fee:string,charge:string,net:string}
      */
-    public function chargeTestCard(int $amountMinor, string $currency, string $idempotencyKey, string $description, array $metadata = []): array
+    public function chargeTestCard(int $netMinor, string $currency, string $idempotencyKey, string $description, array $metadata = []): array
     {
         if (!str_starts_with($this->secretKey, 'sk_test_')) {
             throw new HttpException(422, 'Chybí Apple Pay token.');
         }
-        $this->assertAmount($amountMinor);
-        return $this->confirmIntent([
-            'amount' => (string) $amountMinor,
+        $this->assertAmount($netMinor);
+        $priced = StripeFee::coverFor(number_format($netMinor / 100, 2, '.', ''), 'US');
+        $intent = $this->confirmIntent([
+            'amount' => (string) $priced['chargeMinor'],
             'currency' => strtolower($currency),
             'confirm' => 'true',
             'off_session' => 'true',
@@ -192,6 +204,11 @@ final class StripeGateway
             'payment_method' => 'pm_card_visa',
             'payment_method_types' => ['card'],
         ] + $this->metadataFields($metadata), $idempotencyKey . ':test-pi');
+        return $intent + [
+            'fee' => $priced['fee'],
+            'charge' => $priced['charge'],
+            'net' => $priced['net'],
+        ];
     }
 
     /** @param array<string, string> $metadata @return array<string, string> */
@@ -228,7 +245,8 @@ final class StripeGateway
         ];
     }
 
-    private function createApplePayToken(string $paymentDataJson, string $idempotencyKey): string
+    /** @return array<string, mixed> */
+    private function createApplePayToken(string $paymentDataJson, string $idempotencyKey): array
     {
         $decoded = json_decode($paymentDataJson, true);
         if (!is_array($decoded)) {
@@ -237,17 +255,137 @@ final class StripeGateway
         $token = $this->request('POST', '/v1/tokens', [
             'pk_token' => $paymentDataJson,
         ], $idempotencyKey);
-        $id = (string) ($token['id'] ?? '');
-        if ($id === '') {
+        if ((string) ($token['id'] ?? '') === '') {
             throw new HttpException(402, 'Stripe token se nepodařilo vytvořit.');
         }
-        return $id;
+        return $token;
+    }
+
+    /**
+     * Metoda, stav, poplatek a výplata tak, jak je vrací Stripe.
+     *
+     * @return array<string, mixed>
+     */
+    public function paymentFacts(string $reference): array
+    {
+        $reference = trim($reference);
+        if (str_starts_with($reference, 'cs_')) {
+            $session = $this->request('GET', '/v1/checkout/sessions/' . rawurlencode($reference), [
+                'expand[0]' => 'payment_intent',
+                'expand[1]' => 'payment_intent.latest_charge',
+                'expand[2]' => 'payment_intent.latest_charge.balance_transaction',
+            ], $reference . ':facts');
+            $intent = $session['payment_intent'] ?? null;
+            return is_array($intent) ? $this->factsFromIntent($intent) : [];
+        }
+        if (str_starts_with($reference, 'pi_')) {
+            $intent = $this->request('GET', '/v1/payment_intents/' . rawurlencode($reference), [
+                'expand[0]' => 'latest_charge',
+                'expand[1]' => 'latest_charge.balance_transaction',
+            ], $reference . ':facts');
+            return $this->factsFromIntent($intent);
+        }
+        if (str_starts_with($reference, 'ch_')) {
+            $charge = $this->request('GET', '/v1/charges/' . rawurlencode($reference), [
+                'expand[0]' => 'balance_transaction',
+            ], $reference . ':facts');
+            return $this->factsFromCharge($charge, (string) ($charge['payment_intent'] ?? ''));
+        }
+        return [];
+    }
+
+    /** @param array<string, mixed> $intent @return array<string, mixed> */
+    private function factsFromIntent(array $intent): array
+    {
+        $charge = $intent['latest_charge'] ?? null;
+        if (is_string($charge) && str_starts_with($charge, 'ch_')) {
+            $charge = $this->request('GET', '/v1/charges/' . rawurlencode($charge), [
+                'expand[0]' => 'balance_transaction',
+            ], $charge . ':facts');
+        }
+        if (!is_array($charge)) {
+            return [
+                'intent_id' => (string) ($intent['id'] ?? ''),
+                'intent_status' => (string) ($intent['status'] ?? ''),
+                'livemode' => (bool) ($intent['livemode'] ?? false),
+            ];
+        }
+        return $this->factsFromCharge($charge, (string) ($intent['id'] ?? ''), (string) ($intent['status'] ?? ''));
+    }
+
+    /** @param array<string, mixed> $charge @return array<string, mixed> */
+    private function factsFromCharge(array $charge, string $intentId, string $intentStatus = ''): array
+    {
+        $method = is_array($charge['payment_method_details'] ?? null) ? $charge['payment_method_details'] : [];
+        $type = (string) ($method['type'] ?? '');
+        $typed = is_array($method[$type] ?? null) ? $method[$type] : [];
+        $wallet = is_array($typed['wallet'] ?? null) ? (string) ($typed['wallet']['type'] ?? '') : '';
+        $balance = $charge['balance_transaction'] ?? null;
+        if (is_string($balance) && str_starts_with($balance, 'txn_')) {
+            try {
+                $balance = $this->request('GET', '/v1/balance_transactions/' . rawurlencode($balance), [], $balance . ':get');
+            } catch (HttpException) {
+                $balance = null;
+            }
+        }
+        $balance = is_array($balance) ? $balance : [];
+        $outcome = is_array($charge['outcome'] ?? null) ? $charge['outcome'] : [];
+        $fees = [];
+        foreach (is_array($balance['fee_details'] ?? null) ? $balance['fee_details'] : [] as $fee) {
+            if (!is_array($fee)) {
+                continue;
+            }
+            $fees[] = [
+                'amount' => $this->minorToMoney((int) ($fee['amount'] ?? 0)),
+                'label' => (string) ($fee['description'] ?? ''),
+                'type' => (string) ($fee['type'] ?? ''),
+            ];
+        }
+        $availableOn = (int) ($balance['available_on'] ?? 0);
+
+        return [
+            'livemode' => (bool) ($charge['livemode'] ?? false),
+            'intent_id' => $intentId !== '' ? $intentId : (string) ($charge['payment_intent'] ?? ''),
+            'intent_status' => $intentStatus,
+            'charge_id' => (string) ($charge['id'] ?? ''),
+            'charge_status' => (string) ($charge['status'] ?? ''),
+            'paid' => (bool) ($charge['paid'] ?? false),
+            'refunded' => (bool) ($charge['refunded'] ?? false),
+            'disputed' => (bool) ($charge['disputed'] ?? false),
+            'amount_refunded' => $this->minorToMoney((int) ($charge['amount_refunded'] ?? 0)),
+            'method' => $type,
+            'wallet' => $wallet,
+            'brand' => (string) ($typed['brand'] ?? ''),
+            'last4' => (string) ($typed['last4'] ?? ''),
+            'funding' => (string) ($typed['funding'] ?? ''),
+            'country' => (string) ($typed['country'] ?? ''),
+            'outcome' => (string) ($outcome['type'] ?? ''),
+            'risk_level' => (string) ($outcome['risk_level'] ?? ''),
+            'network_status' => (string) ($outcome['network_status'] ?? ''),
+            'fee' => $this->minorToMoney((int) ($balance['fee'] ?? 0)),
+            'net' => $this->minorToMoney((int) ($balance['net'] ?? 0)),
+            'charged' => $this->minorToMoney((int) ($charge['amount'] ?? 0)),
+            'currency' => strtoupper((string) ($charge['currency'] ?? 'CZK')),
+            'balance_status' => (string) ($balance['status'] ?? ''),
+            'available_on' => $availableOn > 0 ? gmdate('Y-m-d H:i:s', $availableOn) : '',
+            'fees' => $fees,
+            'receipt_url' => (string) ($charge['receipt_url'] ?? ''),
+        ];
+    }
+
+    private function minorToMoney(int $minor): string
+    {
+        return number_format($minor / 100, 2, '.', '');
     }
 
     /** @param array<string, mixed> $fields */
     private function request(string $method, string $path, array $fields, string $idempotencyKey): array
     {
-        $ch = curl_init('https://api.stripe.com' . $path);
+        $url = 'https://api.stripe.com' . $path;
+        if ($method === 'GET' && $fields !== []) {
+            $url .= '?' . http_build_query($fields);
+        }
+        $ch = curl_init($url);
         if ($ch === false) {
             throw new HttpException(502, 'Stripe je teď nedostupný.');
         }
