@@ -1181,6 +1181,10 @@ final class AdminController extends Controller
         ];
         foreach ($keys as $key => $default) {
             $raw = $request->input($key, $request->input(str_replace('.', '_', $key), $default));
+            if ($key === 'reservation.max_minutes' && trim((string) $raw) === '') {
+                $this->app->settings()->set($key, '');
+                continue;
+            }
             $value = max(0, (int) $raw);
             if (isset($limits[$key])) {
                 [$min, $max] = $limits[$key];

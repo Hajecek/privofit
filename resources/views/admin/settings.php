@@ -2,7 +2,8 @@
 $audit = is_array($audit ?? null) ? $audit : [];
 $slot = (int) setting('reservation.slot_minutes', 15);
 $min = (int) setting('reservation.min_minutes', 60);
-$max = (int) setting('reservation.max_minutes', 1440);
+$maxRaw = setting('reservation.max_minutes', '');
+$max = ($maxRaw === '' || $maxRaw === null || (int) $maxRaw <= 0) ? '' : (string) (int) $maxRaw;
 $buffer = (int) setting('reservation.buffer_minutes', 15);
 $cancel = (int) setting('reservation.cancellation_hours', 12);
 $advance = max(1, min(365, (int) setting('reservation.advance_days', 56)));
@@ -73,7 +74,7 @@ $blockMinutes = $min + $buffer;
             <div class="field">
                 <label for="setting-max">Max. délka tréninku (min)</label>
                 <input id="setting-max" name="reservation_max_minutes" inputmode="numeric" value="<?= e((string) $max) ?>">
-                <p class="muted">Strop v minutách tréninku. 1440 dovolí rezervaci až na celou otevírací dobu.</p>
+                <p class="muted">Nech prázdné a zákazník může vybrat celý den až do zavíračky. Jinak je to strop v minutách tréninku.</p>
             </div>
             <div class="field">
                 <label for="setting-buffer">Rezerva na převlečení (min)</label>

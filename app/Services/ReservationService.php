@@ -1339,6 +1339,17 @@ final class ReservationService
         return max(0, $this->settings->int('reservation.buffer_minutes', 15));
     }
 
+    /** Prázdné pole znamená celou otevírací dobu, bez minutového stropu. */
+    private function configuredMaxMinutes(): ?int
+    {
+        $raw = $this->settings->get('reservation.max_minutes', '');
+        if ($raw === '' || $raw === null) {
+            return null;
+        }
+        $value = (int) $raw;
+        return $value > 0 ? $value : null;
+    }
+
     private function advanceDays(): int
     {
         return max(1, min(365, $this->settings->int('reservation.advance_days', 56)));
@@ -1360,8 +1371,8 @@ final class ReservationService
         $span = max(0, (int) round(($close->getTimestamp() - $open->getTimestamp()) / 60));
         $blocks = intdiv($span, $block);
         $dayMax = max($step, $blocks * $step);
-        $configured = $this->settings->int('reservation.max_minutes', $dayMax);
-        if ($configured < $step) {
+        $configured = $this->configuredMaxMinutes();
+        if ($configured === null || $configured < $step) {
             return $dayMax;
         }
         return min($configured, $dayMax);
