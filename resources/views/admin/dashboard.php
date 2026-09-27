@@ -201,80 +201,6 @@ $liveRev = (string) ($liveRev ?? '');
 
     </section>
 
-    <section class="adash-kpis" aria-label="Klíčové ukazatele">
-        <article class="adash-kpi" data-kpi="today_reservations">
-            <span>Rezervace dnes</span>
-            <strong><?= (int) ($stats['today_reservations'] ?? 0) ?></strong>
-        </article>
-        <article class="adash-kpi" data-kpi="entries">
-            <span>Vstupy dnes</span>
-            <strong><?= (int) ($stats['entries'] ?? 0) ?></strong>
-        </article>
-        <article class="adash-kpi<?= (int) ($stats['failed_access'] ?? 0) > 0 ? ' is-alert' : '' ?>" data-kpi="failed_access">
-            <span>Neúspěšné</span>
-            <strong><?= (int) ($stats['failed_access'] ?? 0) ?></strong>
-        </article>
-        <article class="adash-kpi" data-kpi="active_members">
-            <span>Aktivní členové</span>
-            <strong><?= (int) ($stats['active_members'] ?? 0) ?></strong>
-        </article>
-        <a class="adash-kpi adash-kpi-link" href="<?= e(url('/user/sprava/zakaznici')) ?>" data-kpi="customers">
-            <span>Zákazníci</span>
-            <strong><?= (int) ($stats['customers'] ?? 0) ?></strong>
-        </a>
-        <a class="adash-kpi adash-kpi-link" href="<?= e(url('/user/sprava/zajem')) ?>" data-kpi="interest">
-            <span>Zájem</span>
-            <strong><?= (int) ($stats['interest'] ?? 0) ?></strong>
-        </a>
-    </section>
-
-    <div class="adash-grid">
-        <div class="adash-side">
-            <section class="door-panel dash-door<?= $doorOpen ? ' is-open' : ' is-closed' ?>" data-dash-door>
-                <div class="dash-door-top">
-                    <div>
-                        <p class="eyebrow"><?= e(strtoupper((string) ($door['provider'] ?? 'ZÁMEK'))) ?></p>
-                        <h2>Dveře</h2>
-                    </div>
-                    <p class="dash-door-state" data-dash-door-state><?= !$configured ? 'Neznámý stav' : ($doorOpen ? 'Otevřeno' : 'Zavřeno') ?></p>
-                </div>
-                <div class="door-stats dash-door-stats">
-                    <article class="door-stat<?= $configured && $online ? ' is-on' : ' is-off' ?>" data-dash-online>
-                        <span class="door-stat-k">Spojení</span>
-                        <strong><i class="door-dot" aria-hidden="true"></i><span data-dash-online-label><?= $configured && $online ? 'Online' : 'Offline' ?></span></strong>
-                        <span class="door-stat-sub" data-dash-online-sub><?= $configured && $online ? 'Zámek odpovídá' : 'Zámek teď neodpovídá' ?></span>
-                    </article>
-                    <article class="door-stat<?= $doorBatteryLow ? ' is-low' : '' ?>" data-dash-battery-stat>
-                        <span class="door-stat-k">Baterie</span>
-                        <strong>
-                            <span class="door-bat<?= $doorBatteryLow ? ' is-low' : '' ?>" data-dash-bat aria-hidden="true"><span class="door-bat-fill" data-dash-fill style="width: <?= $doorBattery ?? 0 ?>%"></span></span>
-                            <span data-dash-battery><?= $doorBattery === null ? '—' : e((string) $doorBattery) . '%' ?></span>
-                        </strong>
-                        <span class="door-stat-sub" data-dash-battery-sub><?= $doorBattery === null ? 'Stav není známý' : ($doorBatteryLow ? 'Dochází, vyměň článek' : 'Nabití je v pořádku') ?></span>
-                    </article>
-                    <article class="door-stat door-stat-mode<?= $testMode ? ' is-test' : ' is-live' ?>" data-dash-mode>
-                        <span class="door-stat-k">Režim</span>
-                        <strong data-dash-mode-label><?= $testMode ? 'Test' : 'Ostrý' ?></strong>
-                        <span class="door-stat-sub" data-dash-mode-sub><?= $testMode ? 'Fyzické dveře se nepohnou' : 'Příkaz jde rovnou na zámek' ?></span>
-                    </article>
-                </div>
-                <a class="btn btn-secondary adash-panel-btn" href="<?= e(url('/user/sprava/vstup')) ?>">Ovládat dveře</a>
-            </section>
-
-        </div>
-    </div>
-
-    <nav class="adash-links" aria-label="Rychlé odkazy">
-        <a href="<?= e(url('/user/sprava/rezervace')) ?>"><strong>Rezervace</strong><span>Zrušení termínů</span></a>
-        <a href="<?= e(url('/user/sprava/trzby')) ?>"><strong>Tržby</strong><span>Platby a grafy</span></a>
-        <a href="<?= e(url('/user/sprava/statistiky')) ?>"><strong>Statistiky</strong><span>Návštěvy a plus / minus</span></a>
-        <a href="<?= e(url('/user/sprava/zakaznici')) ?>"><strong>Zákazníci</strong><span data-link-customers><?= (int) ($stats['customers'] ?? 0) ?> účtů</span></a>
-        <a href="<?= e(url('/user/studio')) ?>"><strong>Studia</strong><span>Prostory</span></a>
-        <a href="<?= e(url('/user/sprava/tarify')) ?>"><strong>Tarify</strong><span>Ceník</span></a>
-        <a href="<?= e(url('/user/sprava/zajem')) ?>"><strong>Zájem</strong><span data-link-interest><?= (int) ($stats['interest'] ?? 0) ?> leadů</span></a>
-        <a href="<?= e(url('/user/sprava/nastaveni')) ?>"><strong>Nastavení</strong><span>Pravidla</span></a>
-    </nav>
-
     <section class="adash-load" aria-label="Dnešní vytížení">
         <?php
         $schedule = is_array($schedule ?? null) ? $schedule : [];
@@ -352,6 +278,81 @@ $liveRev = (string) ($liveRev ?? '');
         <?php endif; ?>
         </div>
     </section>
+
+    <section class="adash-kpis" aria-label="Klíčové ukazatele">
+        <article class="adash-kpi" data-kpi="today_reservations">
+            <span>Rezervace dnes</span>
+            <strong><?= (int) ($stats['today_reservations'] ?? 0) ?></strong>
+        </article>
+        <article class="adash-kpi" data-kpi="entries">
+            <span>Vstupy dnes</span>
+            <strong><?= (int) ($stats['entries'] ?? 0) ?></strong>
+        </article>
+        <article class="adash-kpi<?= (int) ($stats['failed_access'] ?? 0) > 0 ? ' is-alert' : '' ?>" data-kpi="failed_access">
+            <span>Neúspěšné</span>
+            <strong><?= (int) ($stats['failed_access'] ?? 0) ?></strong>
+        </article>
+        <article class="adash-kpi" data-kpi="active_members">
+            <span>Aktivní členové</span>
+            <strong><?= (int) ($stats['active_members'] ?? 0) ?></strong>
+        </article>
+        <a class="adash-kpi adash-kpi-link" href="<?= e(url('/user/sprava/zakaznici')) ?>" data-kpi="customers">
+            <span>Zákazníci</span>
+            <strong><?= (int) ($stats['customers'] ?? 0) ?></strong>
+        </a>
+        <a class="adash-kpi adash-kpi-link" href="<?= e(url('/user/sprava/zajem')) ?>" data-kpi="interest">
+            <span>Zájem</span>
+            <strong><?= (int) ($stats['interest'] ?? 0) ?></strong>
+        </a>
+    </section>
+
+    <div class="adash-grid">
+        <div class="adash-side">
+            <section class="door-panel dash-door<?= $doorOpen ? ' is-open' : ' is-closed' ?>" data-dash-door>
+                <div class="dash-door-top">
+                    <div>
+                        <p class="eyebrow"><?= e(strtoupper((string) ($door['provider'] ?? 'ZÁMEK'))) ?></p>
+                        <h2>Dveře</h2>
+                    </div>
+                    <p class="dash-door-state" data-dash-door-state><?= !$configured ? 'Neznámý stav' : ($doorOpen ? 'Otevřeno' : 'Zavřeno') ?></p>
+                </div>
+                <div class="door-stats dash-door-stats">
+                    <article class="door-stat<?= $configured && $online ? ' is-on' : ' is-off' ?>" data-dash-online>
+                        <span class="door-stat-k">Spojení</span>
+                        <strong><i class="door-dot" aria-hidden="true"></i><span data-dash-online-label><?= $configured && $online ? 'Online' : 'Offline' ?></span></strong>
+                        <span class="door-stat-sub" data-dash-online-sub><?= $configured && $online ? 'Zámek odpovídá' : 'Zámek teď neodpovídá' ?></span>
+                    </article>
+                    <article class="door-stat<?= $doorBatteryLow ? ' is-low' : '' ?>" data-dash-battery-stat>
+                        <span class="door-stat-k">Baterie</span>
+                        <strong>
+                            <span class="door-bat<?= $doorBatteryLow ? ' is-low' : '' ?>" data-dash-bat aria-hidden="true"><span class="door-bat-fill" data-dash-fill style="width: <?= $doorBattery ?? 0 ?>%"></span></span>
+                            <span data-dash-battery><?= $doorBattery === null ? '—' : e((string) $doorBattery) . '%' ?></span>
+                        </strong>
+                        <span class="door-stat-sub" data-dash-battery-sub><?= $doorBattery === null ? 'Stav není známý' : ($doorBatteryLow ? 'Dochází, vyměň článek' : 'Nabití je v pořádku') ?></span>
+                    </article>
+                    <article class="door-stat door-stat-mode<?= $testMode ? ' is-test' : ' is-live' ?>" data-dash-mode>
+                        <span class="door-stat-k">Režim</span>
+                        <strong data-dash-mode-label><?= $testMode ? 'Test' : 'Ostrý' ?></strong>
+                        <span class="door-stat-sub" data-dash-mode-sub><?= $testMode ? 'Fyzické dveře se nepohnou' : 'Příkaz jde rovnou na zámek' ?></span>
+                    </article>
+                </div>
+                <a class="btn btn-secondary adash-panel-btn" href="<?= e(url('/user/sprava/vstup')) ?>">Ovládat dveře</a>
+            </section>
+
+        </div>
+    </div>
+
+    <nav class="adash-links" aria-label="Rychlé odkazy">
+        <a href="<?= e(url('/user/sprava/rezervace')) ?>"><strong>Rezervace</strong><span>Zrušení termínů</span></a>
+        <a href="<?= e(url('/user/sprava/trzby')) ?>"><strong>Tržby</strong><span>Platby a grafy</span></a>
+        <a href="<?= e(url('/user/sprava/statistiky')) ?>"><strong>Statistiky</strong><span>Návštěvy a plus / minus</span></a>
+        <a href="<?= e(url('/user/sprava/zakaznici')) ?>"><strong>Zákazníci</strong><span data-link-customers><?= (int) ($stats['customers'] ?? 0) ?> účtů</span></a>
+        <a href="<?= e(url('/user/studio')) ?>"><strong>Studia</strong><span>Prostory</span></a>
+        <a href="<?= e(url('/user/sprava/tarify')) ?>"><strong>Tarify</strong><span>Ceník</span></a>
+        <a href="<?= e(url('/user/sprava/zajem')) ?>"><strong>Zájem</strong><span data-link-interest><?= (int) ($stats['interest'] ?? 0) ?> leadů</span></a>
+        <a href="<?= e(url('/user/sprava/nastaveni')) ?>"><strong>Nastavení</strong><span>Pravidla</span></a>
+    </nav>
+
 </div>
 
 <form method="post" hidden data-cust-form="cancel-reservation">

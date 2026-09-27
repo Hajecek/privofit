@@ -12,12 +12,12 @@ use App\Services\Cron\NotificationDispatcher;
 use App\Support\Clock;
 
 /**
- * Souhrn dnešní tržby pro administrátory. Jen v aplikaci, bez e-mailu.
- * Každých 5 minut odejde nová notifikace s částkou spočítanou z aktuálních plateb daného dne.
+ * Souhrn včerejší tržby pro administrátory. Jen v aplikaci, bez e-mailu.
+ * Odejde jednou denně v 9:00 místního času a sčítá celý předchozí kalendářní den.
  */
 final class DailyRevenueJob implements CronJob
 {
-    public const INTERVAL_MINUTES = 5;
+    private const SEND_HOUR = 9;
 
     public function __construct(
         private readonly Database $db,
@@ -35,11 +35,16 @@ final class DailyRevenueJob implements CronJob
     {
         $now = $this->now ?? Clock::nowUtc();
         $local = $now->setTimezone(new \DateTimeZone(Clock::displayTimezone()));
-        $live = self::snapshot($this->db, $now);
+        if ((int) $local->format('G') < self::SEND_HOUR) {
+            return ['scheduled' => 0];
+        }
+
+        $reportDay = $local->setTime(0, 0)->modify('-1 day');
+        $live = self::snapshot($this->db, $reportDay);
         $scheduled = $this->notify->schedule(
-            'admin:revenue.today:' . $this->slotKey($local),
+            'admin:revenue.yesterday:' . $reportDay->format('Y-m-d'),
             'admin',
-            'revenue.today',
+            'revenue.yesterday',
             null,
             [
                 'template' => 'admin-revenue',
@@ -56,12 +61,11 @@ final class DailyRevenueJob implements CronJob
     }
 
     /** @return array{day:string,total:float,count:int,subject:string,body:string} */
-    public static function snapshot(Database $db, ?\DateTimeImmutable $now = null): array
+    private static function snapshot(Database $db, \DateTimeImmutable $dayLocal): array
     {
-        $now = $now ?? Clock::nowUtc();
-        $local = $now->setTimezone(new \DateTimeZone(Clock::displayTimezone()));
-        $start = Clock::toUtc($local->setTime(0, 0));
-        $end = Clock::toUtc($local->setTime(0, 0)->modify('+1 day'));
+        $day = $dayLocal->setTime(0, 0);
+        $start = Clock::toUtc($day);
+        $end = Clock::toUtc($day->modify('+1 day'));
         $row = $db->fetch(
             'SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS purchases
              FROM payments
@@ -78,10 +82,10 @@ final class DailyRevenueJob implements CronJob
         $amount = money_format_czk($total);
 
         return [
-            'day' => $local->format('Y-m-d'),
+            'day' => $day->format('Y-m-d'),
             'total' => $total,
             'count' => $count,
-            'subject' => ($count > 0 ? '💰 Dnešní tržba' : '🌱 Dnešní tržba') . ' · ' . $local->format('H:i'),
+            'subject' => ($count > 0 ? '💰 Včerejší tržba' : '🌱 Včerejší tržba') . ' · ' . $day->format('j. n. Y'),
             'body' => self::bodyText($amount, $count),
         ];
     }
@@ -89,10 +93,10 @@ final class DailyRevenueJob implements CronJob
     private static function bodyText(string $amount, int $count): string
     {
         if ($count < 1) {
-            return 'Takový je dnešní den: ' . $amount . '. Zatím žádný nákup. 🌱';
+            return 'Takový byl včerejší den: ' . $amount . '. Žádný nákup. 🌱';
         }
 
-        return 'Takový je dnešní den: ' . $amount . ' (' . $count . ' ' . self::purchaseLabel($count) . '). Jedeme dál! 🔥';
+        return 'Takový byl včerejší den: ' . $amount . ' (' . $count . ' ' . self::purchaseLabel($count) . '). Jedeme dál! 🔥';
     }
 
     private static function purchaseLabel(int $count): string
@@ -109,17 +113,5 @@ final class DailyRevenueJob implements CronJob
         }
 
         return 'nákupů';
-    }
-
-    private function slotKey(\DateTimeImmutable $local): string
-    {
-        $interval = max(1, self::INTERVAL_MINUTES);
-        if ($interval >= 1440) {
-            return $local->format('Y-m-d');
-        }
-        $minutes = ((int) $local->format('H')) * 60 + (int) $local->format('i');
-        $bucket = intdiv($minutes, $interval) * $interval;
-
-        return $local->format('Y-m-d') . sprintf('T%02d:%02d', intdiv($bucket, 60), $bucket % 60);
     }
 }

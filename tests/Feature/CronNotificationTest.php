@@ -300,7 +300,7 @@ final class CronNotificationTest extends TestCase
         }
     }
 
-    public function testDailyRevenueReachesAdminOncePerTestSlot(): void
+    public function testDailyRevenueReachesAdminOnceForPreviousDayAtNine(): void
     {
         try {
             $this->db->fetch('SELECT id FROM cron_events LIMIT 1');
@@ -316,28 +316,39 @@ final class CronNotificationTest extends TestCase
         $pdo->beginTransaction();
         try {
             $this->db->update('users', ['role' => 'admin'], 'id = :id', ['id' => $adminId]);
-            $now = new \DateTimeImmutable('2099-08-15 10:07:00', new \DateTimeZone('UTC'));
             $this->insertPayment($customerId, '1000.00', 'paid', 'stripe', '2099-08-15 08:00:00');
             $this->insertPayment($customerId, '250.00', 'paid', 'stripe', '2099-08-15 09:30:00');
             $this->insertPayment($customerId, '500.00', 'paid', 'gift', '2099-08-15 09:40:00');
             $this->insertPayment($customerId, '800.00', 'pending', 'stripe', '2099-08-15 09:45:00');
             $this->insertPayment($customerId, '900.00', 'paid', 'stripe', '2099-08-14 10:00:00');
+            $this->insertPayment($customerId, '40.00', 'paid', 'stripe', '2099-08-13 21:30:00');
 
             $notify = NotificationDispatcher::make($this->db);
-            $job = new DailyRevenueJob($this->db, $notify, $now);
+            $early = new DailyRevenueJob(
+                $this->db,
+                $notify,
+                new \DateTimeImmutable('2099-08-15 06:30:00', new \DateTimeZone('UTC'))
+            );
+            $this->assertSame(0, $early->run()['scheduled']);
+
+            $job = new DailyRevenueJob(
+                $this->db,
+                $notify,
+                new \DateTimeImmutable('2099-08-15 07:00:00', new \DateTimeZone('UTC'))
+            );
             $this->assertSame(1, $job->run()['scheduled']);
             $this->assertSame(0, $job->run()['scheduled']);
 
             $event = $this->db->fetch(
                 "SELECT event_key, audience, payload_json FROM cron_events WHERE event_key = :key",
-                ['key' => 'admin:revenue.today:2099-08-15T12:05']
+                ['key' => 'admin:revenue.yesterday:2099-08-14']
             );
             $this->assertIsArray($event);
             $this->assertSame('admin', $event['audience']);
             $payload = json_decode((string) $event['payload_json'], true);
-            $this->assertSame('💰 Dnešní tržba · 12:07', $payload['subject']);
-            $this->assertStringContainsString('1 250 Kč', (string) $payload['body']);
-            $this->assertStringContainsString('2 nákupy', (string) $payload['body']);
+            $this->assertSame('💰 Včerejší tržba · 14. 8. 2099', $payload['subject']);
+            $this->assertStringContainsString('900 Kč', (string) $payload['body']);
+            $this->assertStringContainsString('1 nákup', (string) $payload['body']);
             $this->assertStringContainsString('🔥', (string) $payload['body']);
 
             $this->assertSame('dispatched', $notify->dispatchKey((string) $event['event_key']));
@@ -345,31 +356,48 @@ final class CronNotificationTest extends TestCase
             $this->assertSame(1, $this->countChannel($adminId, 'admin-revenue', 'in_app'));
             $this->assertSame(0, $this->countNotes($customerId, 'admin-revenue'));
 
-            $this->insertPayment($customerId, '100.00', 'paid', 'stripe', '2099-08-15 10:10:00');
-            $again = new DailyRevenueJob($this->db, $notify, $now->modify('+5 minutes'));
-            $this->assertSame(1, $again->run()['scheduled']);
-            $nextKey = 'admin:revenue.today:2099-08-15T12:10';
-            $this->assertSame('dispatched', $notify->dispatchKey($nextKey));
-            $this->assertSame(2, $this->countChannel($adminId, 'admin-revenue', 'in_app'));
+            $later = new DailyRevenueJob(
+                $this->db,
+                $notify,
+                new \DateTimeImmutable('2099-08-15 14:00:00', new \DateTimeZone('UTC'))
+            );
+            $this->assertSame(0, $later->run()['scheduled']);
+            $this->assertSame(1, $this->countChannel($adminId, 'admin-revenue', 'in_app'));
+
+            $next = new DailyRevenueJob(
+                $this->db,
+                $notify,
+                new \DateTimeImmutable('2099-08-16 07:05:00', new \DateTimeZone('UTC'))
+            );
+            $this->assertSame(1, $next->run()['scheduled']);
+            $this->assertSame('dispatched', $notify->dispatchKey('admin:revenue.yesterday:2099-08-15'));
             $fresh = json_decode((string) $this->db->fetchColumn(
                 "SELECT payload_json FROM notifications WHERE user_id = :uid AND template = 'admin-revenue' AND channel = 'in_app' ORDER BY id DESC LIMIT 1",
                 ['uid' => $adminId]
             ), true);
-            $this->assertStringContainsString('1 350 Kč', (string) ($fresh['body'] ?? ''));
-            $this->assertStringContainsString('3 nákupy', (string) ($fresh['body'] ?? ''));
+            $this->assertSame('💰 Včerejší tržba · 15. 8. 2099', $fresh['subject']);
+            $this->assertStringContainsString('1 250 Kč', (string) ($fresh['body'] ?? ''));
+            $this->assertStringContainsString('2 nákupy', (string) ($fresh['body'] ?? ''));
 
+            $tooEarly = new DailyRevenueJob(
+                $this->db,
+                $notify,
+                new \DateTimeImmutable('2099-01-02 07:30:00', new \DateTimeZone('UTC'))
+            );
+            $this->assertSame(0, $tooEarly->run()['scheduled']);
             $quiet = new DailyRevenueJob(
                 $this->db,
                 $notify,
-                new \DateTimeImmutable('2099-01-02 10:07:00', new \DateTimeZone('UTC'))
+                new \DateTimeImmutable('2099-01-02 08:00:00', new \DateTimeZone('UTC'))
             );
             $this->assertSame(1, $quiet->run()['scheduled']);
             $empty = json_decode((string) $this->db->fetchColumn(
                 'SELECT payload_json FROM cron_events WHERE event_key = :key',
-                ['key' => 'admin:revenue.today:2099-01-02T11:05']
+                ['key' => 'admin:revenue.yesterday:2099-01-01']
             ), true);
-            $this->assertSame('🌱 Dnešní tržba · 11:07', $empty['subject']);
+            $this->assertSame('🌱 Včerejší tržba · 1. 1. 2099', $empty['subject']);
             $this->assertStringContainsString('0 Kč', (string) $empty['body']);
+            $this->assertStringContainsString('Žádný nákup', (string) $empty['body']);
         } finally {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();

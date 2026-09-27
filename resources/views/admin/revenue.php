@@ -13,7 +13,7 @@ if ($fromValue === '') {
 if ($toValue === '') {
     $toValue = $today;
 }
-$rangeOn = in_array($key, ['den', 'rozsah'], true);
+$rangeOn = $key === 'rozsah';
 $chartJson = json_encode($chart, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP) ?: '{}';
 $segments = is_array($chart['segments'] ?? null) ? $chart['segments'] : [];
 $showChart = count($chart['days'] ?? []) > 1;
@@ -32,34 +32,34 @@ $tabs = [
         <h1>Tržby</h1>
         <p class="muted"><?= e((string) ($period['label'] ?? 'Přehled plateb')) ?></p>
     </div>
-    <div class="page-head-actions">
-        <a class="btn btn-secondary" href="<?= e(url('/user/sprava/statistiky')) ?>">Statistiky</a>
-        <a class="btn btn-secondary" href="<?= e(url('/user/sprava')) ?>">← Dashboard</a>
+    <div class="page-head-actions rev-head-tools">
+        <div class="rev-filter-presets" role="tablist" aria-label="Rychlé období">
+            <?php foreach ($tabs as $tabKey => $tabLabel): ?>
+                <a
+                    role="tab"
+                    aria-selected="<?= $key === $tabKey ? 'true' : 'false' ?>"
+                    class="rev-chip<?= $key === $tabKey ? ' is-on' : '' ?>"
+                    href="<?= e(url('/user/sprava/trzby?obdobi=' . $tabKey)) ?>"
+                ><?= e($tabLabel) ?></a>
+            <?php endforeach; ?>
+            <button
+                type="button"
+                role="tab"
+                aria-selected="<?= $rangeOn ? 'true' : 'false' ?>"
+                class="rev-chip<?= $rangeOn ? ' is-on' : '' ?>"
+                data-rev-open
+            >Rozmezí</button>
+        </div>
+        <span class="rev-head-split" aria-hidden="true"></span>
+        <div class="rev-head-links">
+            <a class="btn btn-secondary" href="<?= e(url('/user/sprava/statistiky')) ?>">Statistiky</a>
+            <a class="btn btn-secondary" href="<?= e(url('/user/sprava')) ?>">← Dashboard</a>
+        </div>
     </div>
 </div>
-
-<section class="rev-filter card" aria-label="Filtr období">
-    <div class="rev-filter-presets" role="tablist" aria-label="Rychlé období">
-        <?php foreach ($tabs as $tabKey => $tabLabel): ?>
-            <a
-                role="tab"
-                aria-selected="<?= $key === $tabKey ? 'true' : 'false' ?>"
-                class="rev-chip<?= $key === $tabKey ? ' is-on' : '' ?>"
-                href="<?= e(url('/user/sprava/trzby?obdobi=' . $tabKey)) ?>"
-            ><?= e($tabLabel) ?></a>
-        <?php endforeach; ?>
-        <button
-            type="button"
-            role="tab"
-            aria-selected="<?= $rangeOn ? 'true' : 'false' ?>"
-            class="rev-chip<?= $rangeOn ? ' is-on' : '' ?>"
-            data-rev-open
-        >Rozmezí</button>
-    </div>
-    <?php if ($rangeOn): ?>
-        <p class="rev-filter-note muted">Aktivní rozmezí: <?= e((string) ($period['label'] ?? '')) ?></p>
-    <?php endif; ?>
-</section>
+<?php if ($rangeOn): ?>
+    <p class="rev-filter-note muted">Aktivní rozmezí: <?= e((string) ($period['label'] ?? '')) ?></p>
+<?php endif; ?>
 
 <div class="cancel-modal" data-rev-modal hidden>
     <div class="cancel-modal-backdrop" data-rev-close></div>
