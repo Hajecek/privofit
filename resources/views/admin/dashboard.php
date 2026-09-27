@@ -288,7 +288,24 @@ $liveRev = (string) ($liveRev ?? '');
                 }
                 echo '<span class="sched-stat is-' . e($tone) . '"><strong>' . $count . '</strong> ' . e($label) . '</span>';
             };
-            $schedItem = static function (array $row): void {
+            $schedTip = static function (array $row, bool $hidden = false): void {
+                $name = (string) ($row['name'] ?? 'Zákazník');
+                $username = (string) ($row['username'] ?? '');
+                ?>
+                <span class="sched-tip"<?= $hidden ? ' aria-hidden="true"' : '' ?>>
+                    <?php if (!empty($row['avatar'])): ?>
+                        <img class="sched-tip-avatar" src="<?= e((string) $row['avatar']) ?>" alt="">
+                    <?php endif; ?>
+                    <span class="sched-tip-copy">
+                        <strong><?= e($name) ?></strong>
+                        <?php if ($username !== ''): ?><span class="sched-tip-user">@<?= e($username) ?></span><?php endif; ?>
+                        <span class="sched-tip-when"><?= e((string) ($row['time'] ?? '')) ?>–<?= e((string) ($row['end'] ?? '')) ?> · <?= e((string) ($row['badge'] ?? '')) ?></span>
+                        <?php if (!empty($row['meta'])): ?><span class="sched-tip-meta"><?= e((string) $row['meta']) ?></span><?php endif; ?>
+                    </span>
+                </span>
+                <?php
+            };
+            $schedItem = static function (array $row) use ($schedTip): void {
                 $state = (string) ($row['state'] ?? 'next');
                 if (!in_array($state, ['live', 'next', 'pay', 'past'], true)) {
                     $state = 'next';
@@ -299,6 +316,9 @@ $liveRev = (string) ($liveRev ?? '');
                 }
                 ?>
                 <li class="sched-row is-<?= e($state) ?>">
+                    <?php if (!empty($row['avatar'])): ?>
+                        <img class="sched-avatar" src="<?= e((string) $row['avatar']) ?>" alt="">
+                    <?php endif; ?>
                     <time><strong><?= e((string) ($row['time'] ?? '')) ?></strong><span><?= e((string) ($row['end'] ?? '')) ?></span></time>
                     <div class="sched-copy">
                         <?php if (!empty($row['href'])): ?>
@@ -308,6 +328,7 @@ $liveRev = (string) ($liveRev ?? '');
                         <?php endif; ?>
                         <span><?= e((string) ($row['meta'] ?? '')) ?></span>
                     </div>
+                    <?php $schedTip($row, true); ?>
                     <div class="sched-side">
                         <span class="badge <?= e($badgeClass) ?>"><?= e((string) ($row['badge'] ?? '')) ?></span>
                         <?php if (!empty($row['cancel_url'])): ?>
@@ -342,8 +363,8 @@ $liveRev = (string) ($liveRev ?? '');
                         <?php $schedStat('pay', 'platba', 'pay'); ?>
                         <?php $schedStat('past', 'hotovo', 'past'); ?>
                     </div>
-                    <div class="sched-rail" aria-hidden="true">
-                        <div class="sched-rail-labels">
+                    <div class="sched-rail">
+                        <div class="sched-rail-labels" aria-hidden="true">
                             <?php foreach ($schedTicks as $tick): ?>
                                 <?php if (!is_array($tick)) { continue; } ?>
                                 <?php $edge = (string) ($tick['edge'] ?? ''); ?>
@@ -361,8 +382,22 @@ $liveRev = (string) ($liveRev ?? '');
                             <?php endforeach; ?>
                             <?php foreach ($schedItems as $mark): ?>
                                 <?php if (!is_array($mark)) { continue; } ?>
-                                <?php $markState = (string) ($mark['state'] ?? 'next'); ?>
-                                <i class="sched-mark is-<?= e(in_array($markState, ['live', 'next', 'pay', 'past'], true) ? $markState : 'next') ?>" style="left: <?= e((string) ($mark['left'] ?? 0)) ?>%; width: <?= e((string) ($mark['width'] ?? 2)) ?>%"></i>
+                                <?php
+                                $markState = (string) ($mark['state'] ?? 'next');
+                                if (!in_array($markState, ['live', 'next', 'pay', 'past'], true)) {
+                                    $markState = 'next';
+                                }
+                                $markTip = (string) ($mark['tip'] ?? 'mid');
+                                if (!in_array($markTip, ['start', 'mid', 'end'], true)) {
+                                    $markTip = 'mid';
+                                }
+                                $markLabel = trim((string) ($mark['name'] ?? 'Zákazník') . ', ' . (string) ($mark['time'] ?? '') . '–' . (string) ($mark['end'] ?? ''));
+                                ?>
+                                <?php if (!empty($mark['href'])): ?>
+                                    <a class="sched-mark is-<?= e($markState) ?> is-tip-<?= e($markTip) ?>" href="<?= e((string) $mark['href']) ?>" style="left: <?= e((string) ($mark['left'] ?? 0)) ?>%; width: <?= e((string) ($mark['width'] ?? 2)) ?>%" aria-label="<?= e($markLabel) ?>"><?php $schedTip($mark); ?></a>
+                                <?php else: ?>
+                                    <span class="sched-mark is-<?= e($markState) ?> is-tip-<?= e($markTip) ?>" style="left: <?= e((string) ($mark['left'] ?? 0)) ?>%; width: <?= e((string) ($mark['width'] ?? 2)) ?>%" tabindex="0" aria-label="<?= e($markLabel) ?>"><?php $schedTip($mark); ?></span>
+                                <?php endif; ?>
                             <?php endforeach; ?>
                             <?php if ($schedNow !== null): ?>
                                 <i class="sched-now" style="left: <?= e((string) $schedNow) ?>%"></i>
@@ -425,6 +460,7 @@ $liveRev = (string) ($liveRev ?? '');
     <nav class="adash-links" aria-label="Rychlé odkazy">
         <a href="<?= e(url('/user/sprava/rezervace')) ?>"><strong>Rezervace</strong><span>Zrušení termínů</span></a>
         <a href="<?= e(url('/user/sprava/trzby')) ?>"><strong>Tržby</strong><span>Platby a grafy</span></a>
+        <a href="<?= e(url('/user/sprava/statistiky')) ?>"><strong>Statistiky</strong><span>Návštěvy a plus / minus</span></a>
         <a href="<?= e(url('/user/sprava/zakaznici')) ?>"><strong>Zákazníci</strong><span data-link-customers><?= (int) ($stats['customers'] ?? 0) ?> účtů</span></a>
         <a href="<?= e(url('/user/studio')) ?>"><strong>Studia</strong><span>Prostory</span></a>
         <a href="<?= e(url('/user/sprava/tarify')) ?>"><strong>Tarify</strong><span>Ceník</span></a>

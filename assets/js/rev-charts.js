@@ -75,26 +75,32 @@
     return Math.max(Number(day.amount) || 0, split);
   };
 
-  const tipMarkup = (day, segments) => {
+  const formatCount = (value) => Math.round(Number(value) || 0).toLocaleString("cs-CZ");
+
+  const tipMarkup = (day, segments, opts = {}) => {
+    const countMode = opts.format === "count";
+    const format = countMode ? formatCount : formatMoney;
     const parts = partsFor(day, segments).filter((part) => part.key !== "amount");
-    let html =
-      "<strong>" +
-      esc(formatMoney(day.amount)) +
-      "</strong><span>" +
-      esc(day.label || day.date || "") +
-      " · " +
-      (Number(day.count) || 0) +
-      " plat.</span>";
-    parts.forEach((part) => {
-      html +=
-        '<span class="chart-tip-row"><i style="background:' +
-        part.color +
-        '"></i>' +
-        esc(part.label) +
-        " " +
-        esc(formatMoney(part.value)) +
-        "</span>";
-    });
+    const headline = countMode
+      ? parts.reduce((sum, part) => sum + part.value, 0) || Number(day.amount) || 0
+      : day.amount;
+    let html = "<strong>" + esc(format(headline)) + "</strong><span>" + esc(day.label || day.date || "");
+    if (!countMode) {
+      html += " · " + (Number(day.count) || 0) + " plat.";
+    }
+    html += "</span>";
+    if (!countMode || parts.length > 1) {
+      parts.forEach((part) => {
+        html +=
+          '<span class="chart-tip-row"><i style="background:' +
+          part.color +
+          '"></i>' +
+          esc(part.label) +
+          " " +
+          esc(format(part.value)) +
+          "</span>";
+      });
+    }
     return html;
   };
 
@@ -151,7 +157,7 @@
         return;
       }
       tip.hidden = false;
-      tip.innerHTML = tipMarkup(state.bars[i].day, opts.segments);
+      tip.innerHTML = tipMarkup(state.bars[i].day, opts.segments, opts);
       const parent = tip.offsetParent || document.body;
       const prect = parent.getBoundingClientRect();
       const tipW = tip.offsetWidth || 168;
@@ -557,8 +563,8 @@
     const buttons = Array.from(root.querySelectorAll("[data-chart-kind]"));
     const legend = root.querySelector("[data-chart-legend]");
     const hint = root.querySelector("[data-chart-hint]");
-    const storageKey = "privofit.chartKind";
-    let kind = "line";
+    const storageKey = initialOpts.storageKey || "privofit.chartKind";
+    let kind = initialOpts.kind === "bar" || initialOpts.kind === "area" || initialOpts.kind === "line" ? initialOpts.kind : "line";
     let handle = null;
     let days = initialDays;
     let opts = initialOpts;
@@ -582,7 +588,13 @@
         const next = hint.getAttribute(hintName);
         if (next) hint.textContent = next;
       }
-      const aria = { line: "Vývoj tržeb", area: "Plošný graf tržeb", bar: "Sloupcový graf tržeb" };
+      const aria = opts.subject
+        ? {
+            line: "Vývoj " + opts.subject,
+            area: "Plošný graf " + opts.subject,
+            bar: "Sloupcový graf " + opts.subject,
+          }
+        : { line: "Vývoj tržeb", area: "Plošný graf tržeb", bar: "Sloupcový graf tržeb" };
       canvas.setAttribute("aria-label", aria[kind] || aria.line);
     };
 

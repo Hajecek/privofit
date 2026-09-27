@@ -32,7 +32,10 @@ $tabs = [
         <h1>Tržby</h1>
         <p class="muted"><?= e((string) ($period['label'] ?? 'Přehled plateb')) ?></p>
     </div>
-    <a class="btn btn-secondary" href="<?= e(url('/user/sprava')) ?>">← Dashboard</a>
+    <div class="page-head-actions">
+        <a class="btn btn-secondary" href="<?= e(url('/user/sprava/statistiky')) ?>">Statistiky</a>
+        <a class="btn btn-secondary" href="<?= e(url('/user/sprava')) ?>">← Dashboard</a>
+    </div>
 </div>
 
 <section class="rev-filter card" aria-label="Filtr období">

@@ -60,7 +60,7 @@ final class DailyRevenueJob implements CronJob
             [
                 'template' => 'admin-revenue',
                 'push_type' => 'admin.sync',
-                'subject' => $count > 0 ? '💰 Dnešní tržba' : '🌱 Dnešní tržba',
+                'subject' => ($count > 0 ? '💰 Dnešní tržba' : '🌱 Dnešní tržba') . ' · ' . $local->format('H:i'),
                 'body' => $this->body($amount, $count),
                 'action_url' => CronText::link('/user/sprava'),
             ]

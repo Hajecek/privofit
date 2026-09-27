@@ -102,6 +102,7 @@ $admin = [AuthMiddleware::class, AdminMiddleware::class];
 $router->get('/user/sprava', [AdminController::class, 'dashboard'], $admin);
 $router->get('/user/sprava/live', [AdminController::class, 'dashboardLive'], $admin);
 $router->get('/user/sprava/trzby', [AdminController::class, 'revenue'], $admin);
+$router->get('/user/sprava/statistiky', [AdminController::class, 'statistics'], $admin);
 $router->get('/user/sprava/rezervace', [AdminController::class, 'reservations'], $admin);
 $router->post('/user/sprava/rezervace/{id}/zrusit', [AdminController::class, 'cancelReservation'], $admin);
 $router->get('/user/sprava/zakaznici', [AdminController::class, 'users'], $admin);
@@ -129,6 +130,7 @@ $router->post('/user/sprava/nastaveni', [AdminController::class, 'saveSettings']
 $router->get('/admin', [AdminController::class, 'dashboard'], $admin);
 $router->get('/admin/live', [AdminController::class, 'dashboardLive'], $admin);
 $router->get('/admin/trzby', [AdminController::class, 'revenue'], $admin);
+$router->get('/admin/statistiky', [AdminController::class, 'statistics'], $admin);
 $router->get('/admin/rezervace', [AdminController::class, 'reservations'], $admin);
 $router->post('/admin/rezervace/{id}/zrusit', [AdminController::class, 'cancelReservation'], $admin);
 $router->get('/admin/zakaznici', [AdminController::class, 'users'], $admin);

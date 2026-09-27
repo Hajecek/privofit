@@ -80,6 +80,10 @@ $homeLabel = $adminUi ? 'PRIVOFIT – správa' : 'PRIVOFIT – přehled';
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M4 19h16M7 16V9M12 16V5M17 16v-5"/></svg>
                 <span>Tržby</span>
             </a>
+            <a class="side-link <?= user_active('/user/sprava/statistiky', true) ?>" href="<?= e(url('/user/sprava/statistiky')) ?>" title="Statistiky">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M4 16c2.2-5 4-6 6-2.5S14 16 16 9s2.2-4 4-1"/><path d="M4 20h16"/></svg>
+                <span>Statistiky</span>
+            </a>
             <?php
             $doorNavRow = app()->db()->fetch('SELECT id, last_known_state, last_known_door_state FROM doors WHERE is_active = 1 ORDER BY id ASC LIMIT 1');
             $doorNavLock = strtolower((string) ($doorNavRow['last_known_state'] ?? ''));

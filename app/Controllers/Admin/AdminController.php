@@ -10,6 +10,7 @@ use App\Core\HttpException;
 use App\Core\Request;
 use App\Core\Response;
 use App\Services\Access\AccessControlService;
+use App\Services\AdminStatsService;
 use App\Services\AppPushService;
 use App\Services\AuditService;
 use App\Services\Auth\AuthService;
@@ -62,7 +63,7 @@ final class AdminController extends Controller
 
         $todayReservations = $db->fetchAll(
             "SELECT r.id, r.public_id, r.starts_at, r.ends_at, r.buffer_minutes, r.status, r.guest_count,
-                    u.first_name, u.last_name, u.username, u.public_id AS user_public_id,
+                    u.first_name, u.last_name, u.username, u.public_id AS user_public_id, u.avatar_path,
                     rm.name AS room_name
              FROM reservations r
              INNER JOIN users u ON u.id = r.user_id
@@ -229,10 +230,18 @@ final class AdminController extends Controller
                 $this->durationLabel(max(0, $endMin - $startMin)),
                 $guests > 1 ? $guests . ' os.' : '',
             ], static fn (string $part): bool => $part !== ''));
+            $avatar = avatar_url([
+                'avatar_path' => $row['avatar_path'] ?? null,
+                'public_id' => $publicId !== '' ? $publicId : 'guest',
+                'first_name' => (string) ($row['first_name'] ?? ''),
+                'last_name' => (string) ($row['last_name'] ?? ''),
+            ]);
             $items[] = [
                 'time' => $rs->format('H:i'),
                 'end' => $endClock,
                 'name' => $name,
+                'username' => (string) ($row['username'] ?? ''),
+                'avatar' => $avatar,
                 'href' => $publicId !== '' ? url('/user/sprava/zakaznici/' . $publicId) : '',
                 'meta' => implode(' · ', $meta),
                 'state' => $state,
@@ -254,8 +263,11 @@ final class AdminController extends Controller
             $left = (((int) $item['start_min'] - $fromMin) / $span) * 100;
             $width = (((int) $item['end_min'] - (int) $item['start_min']) / $span) * 100;
             $left = round(max(0, min(100, $left)), 2);
+            $width = round(max(1.4, min(100 - $left, $width)), 2);
+            $center = $left + ($width / 2);
             $items[$index]['left'] = $left;
-            $items[$index]['width'] = round(max(1.4, min(100 - $left, $width)), 2);
+            $items[$index]['width'] = $width;
+            $items[$index]['tip'] = $center < 22 ? 'start' : ($center > 78 ? 'end' : 'mid');
         }
         $counts = ['live' => 0, 'next' => 0, 'pay' => 0, 'past' => 0];
         foreach ($items as $item) {
@@ -1356,6 +1368,16 @@ final class AdminController extends Controller
         );
         $this->flashSuccess('E-mail byl ze zájmu odstraněn.');
         $this->redirect('/user/sprava/zajem');
+    }
+
+    public function statistics(Request $request): never
+    {
+        $key = strtolower(trim((string) $request->query('obdobi', '30d')));
+        $this->view('admin/statistics', [
+            'title' => 'Statistiky',
+            'report' => (new AdminStatsService($this->app->db()))->report($key),
+            'pageScripts' => ['js/rev-charts.js', 'js/stats.js'],
+        ]);
     }
 
     public function revenue(Request $request): never

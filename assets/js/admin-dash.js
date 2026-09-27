@@ -231,10 +231,61 @@
 
   const scheduleState = (value) => (["live", "next", "pay", "past"].includes(value) ? value : "next");
 
+  const scheduleTip = (row, hidden = false) => {
+    const tip = document.createElement("span");
+    tip.className = "sched-tip";
+    if (hidden) tip.setAttribute("aria-hidden", "true");
+    const avatarUrl = safeUrl(row.avatar);
+    if (avatarUrl) {
+      const img = document.createElement("img");
+      img.className = "sched-tip-avatar";
+      img.alt = "";
+      img.src = avatarUrl;
+      tip.append(img);
+    }
+    const copy = document.createElement("span");
+    copy.className = "sched-tip-copy";
+    const name = document.createElement("strong");
+    name.textContent = String(row.name || "Zákazník");
+    copy.append(name);
+    const username = String(row.username || "").trim();
+    if (username !== "") {
+      const user = document.createElement("span");
+      user.className = "sched-tip-user";
+      user.textContent = "@" + username;
+      copy.append(user);
+    }
+    const when = document.createElement("span");
+    when.className = "sched-tip-when";
+    when.textContent = String(row.time || "") + "–" + String(row.end || "") + (row.badge ? " · " + String(row.badge) : "");
+    copy.append(when);
+    const meta = String(row.meta || "");
+    if (meta !== "") {
+      const detail = document.createElement("span");
+      detail.className = "sched-tip-meta";
+      detail.textContent = meta;
+      copy.append(detail);
+    }
+    tip.append(copy);
+    return tip;
+  };
+
+  const scheduleAvatar = (row) => {
+    const avatarUrl = safeUrl(row.avatar);
+    if (!avatarUrl) return null;
+    const img = document.createElement("img");
+    img.className = "sched-avatar";
+    img.alt = "";
+    img.src = avatarUrl;
+    return img;
+  };
+
   const scheduleRow = (row) => {
     const state = scheduleState(row.state || (row.live ? "live" : row.past ? "past" : "next"));
     const item = document.createElement("li");
     item.className = "sched-row is-" + state;
+    const avatar = scheduleAvatar(row);
+    if (avatar) item.append(avatar);
     const time = document.createElement("time");
     const start = document.createElement("strong");
     start.textContent = String(row.time || "");
@@ -267,7 +318,7 @@
       button.textContent = "Zrušit";
       side.append(button);
     }
-    item.append(time, copy, side);
+    item.append(time, copy, scheduleTip(row, true), side);
     return item;
   };
 
@@ -312,9 +363,9 @@
     const windowData = schedule?.window && typeof schedule.window === "object" ? schedule.window : {};
     const rail = document.createElement("div");
     rail.className = "sched-rail";
-    rail.setAttribute("aria-hidden", "true");
     const labels = document.createElement("div");
     labels.className = "sched-rail-labels";
+    labels.setAttribute("aria-hidden", "true");
     (Array.isArray(windowData.ticks) ? windowData.ticks : []).forEach((tick) => {
       const mark = document.createElement("span");
       const edge = String(tick.edge || "");
@@ -344,12 +395,20 @@
       track.append(hair);
     });
     items.forEach((row) => {
-      const block = document.createElement("i");
       const left = Math.max(0, Math.min(100, Number(row.left) || 0));
       const width = Math.max(1.4, Math.min(100 - left, Number(row.width) || 1.4));
-      block.className = "sched-mark is-" + scheduleState(row.state || (row.live ? "live" : row.past ? "past" : "next"));
+      const center = left + width / 2;
+      const align = center < 22 ? "start" : center > 78 ? "end" : "mid";
+      const href = safeUrl(row.href);
+      const block = href ? document.createElement("a") : document.createElement("span");
+      block.className = "sched-mark is-" + scheduleState(row.state || (row.live ? "live" : row.past ? "past" : "next")) + " is-tip-" + align;
       block.style.left = left + "%";
       block.style.width = width + "%";
+      if (href) block.setAttribute("href", href);
+      else block.tabIndex = 0;
+      const label = [String(row.name || "Zákazník"), String(row.time || "") + "–" + String(row.end || "")].filter(Boolean).join(", ");
+      block.setAttribute("aria-label", label);
+      block.append(scheduleTip(row));
       track.append(block);
     });
     if (nowLeft !== null) {

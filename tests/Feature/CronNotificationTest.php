@@ -335,7 +335,7 @@ final class CronNotificationTest extends TestCase
             $this->assertIsArray($event);
             $this->assertSame('admin', $event['audience']);
             $payload = json_decode((string) $event['payload_json'], true);
-            $this->assertSame('💰 Dnešní tržba', $payload['subject']);
+            $this->assertSame('💰 Dnešní tržba · 12:07', $payload['subject']);
             $this->assertStringContainsString('1 250 Kč', (string) $payload['body']);
             $this->assertStringContainsString('2 nákupy', (string) $payload['body']);
             $this->assertStringContainsString('🔥', (string) $payload['body']);
@@ -358,7 +358,7 @@ final class CronNotificationTest extends TestCase
                 'SELECT payload_json FROM cron_events WHERE event_key = :key',
                 ['key' => 'admin:revenue.today:2099-01-02T11:05']
             ), true);
-            $this->assertSame('🌱 Dnešní tržba', $empty['subject']);
+            $this->assertSame('🌱 Dnešní tržba · 11:07', $empty['subject']);
             $this->assertStringContainsString('0 Kč', (string) $empty['body']);
         } finally {
             if ($pdo->inTransaction()) {
