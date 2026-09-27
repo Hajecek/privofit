@@ -2328,6 +2328,28 @@ body.is-view-fx {
   pointer-events: none;
   overflow: hidden;
 }
+.view-fx.is-block { pointer-events: auto; }
+.pay-fx-body {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 22px;
+}
+.pay-fx-spin {
+  width: 46px;
+  height: 46px;
+  border: 3px solid rgba(232, 240, 228, .22);
+  border-top-color: var(--lime);
+  border-radius: 50%;
+  opacity: 0;
+  animation: pay-spin .7s linear infinite;
+}
+.view-fx.is-cover .pay-fx-spin {
+  opacity: 1;
+  transition: opacity 220ms ease 100ms;
+}
+.view-fx.is-done .pay-fx-spin { display: none; }
 .view-fx[hidden] { display: none !important; }
 .view-fx-shade {
   position: absolute;

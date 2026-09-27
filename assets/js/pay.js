@@ -207,8 +207,59 @@
     const url = new URL(data.returnUrl, window.location.origin);
     if (data.intentId) url.searchParams.set("payment_intent", data.intentId);
     leaving = true;
+    if (options.celebrate) {
+      showPaid(url.toString());
+      return true;
+    }
     window.location.assign(url.toString());
     return true;
+  };
+
+  const ensurePayFx = () => {
+    let fx = document.querySelector("[data-pay-fx]");
+    if (fx) return fx;
+    fx = document.createElement("div");
+    fx.className = "view-fx is-block";
+    fx.setAttribute("data-pay-fx", "");
+    fx.hidden = true;
+    fx.innerHTML = '<div class="view-fx-shade" aria-hidden="true"></div><div class="pay-fx-body"><span class="pay-fx-spin" data-pay-fx-spin></span><p class="view-fx-label" data-pay-fx-label></p></div>';
+    document.body.appendChild(fx);
+    return fx;
+  };
+
+  const openPayFx = (text, mode) => {
+    const fx = ensurePayFx();
+    const label = fx.querySelector("[data-pay-fx-label]");
+    fx.dataset.mode = mode;
+    if (label) label.textContent = text;
+    fx.hidden = false;
+    fx.classList.remove("is-reveal", "is-done");
+    document.body.classList.add("is-view-fx");
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => fx.classList.add("is-cover"));
+    });
+  };
+
+  const closePayFx = () => {
+    const fx = document.querySelector("[data-pay-fx]");
+    if (!fx) return;
+    fx.classList.remove("is-cover");
+    fx.classList.add("is-reveal");
+    window.setTimeout(() => {
+      fx.hidden = true;
+      fx.classList.remove("is-reveal", "is-cover");
+      document.body.classList.remove("is-view-fx");
+    }, 520);
+  };
+
+  const showPaid = (url) => {
+    const fx = ensurePayFx();
+    const label = fx.querySelector("[data-pay-fx-label]");
+    fx.dataset.mode = "admin";
+    fx.classList.add("is-done");
+    if (label) label.textContent = "Zaplaceno";
+    fx.classList.add("is-cover");
+    window.setTimeout(() => window.location.assign(url), 900);
   };
 
   const failWallet = (event) => {
@@ -251,12 +302,17 @@
     busy = true;
     setPaying(true);
     showError("");
-    showStatus("Probíhá platba. Na nic už neklikej.");
+    showStatus("");
+    openPayFx("Probíhá platba", "user");
     try {
-      const paid = await completePayment();
-      if (!paid && !leaving) showStatus("");
+      const paid = await completePayment({ celebrate: true });
+      if (!paid && !leaving) {
+        showStatus("");
+        closePayFx();
+      }
     } catch (error) {
       showStatus("");
+      closePayFx();
       showError(error instanceof Error ? error.message : "Platbu se nepodařilo dokončit.");
     } finally {
       busy = false;
