@@ -81,7 +81,7 @@ final class AppPushService
         $this->sendFcmTopic('pf_live', 'live.sync', (string) $revision);
     }
 
-    public function notify(int $userId, string $template, string $title, string $body, string $type): void
+    public function notify(int $userId, string $template, string $title, string $body, string $type, array $extra = []): void
     {
         if ($userId < 1) {
             return;
@@ -95,7 +95,7 @@ final class AppPushService
                 'subject' => $title,
                 'body' => $body,
                 'type' => $type,
-            ], JSON_UNESCAPED_UNICODE),
+            ] + $extra, JSON_UNESCAPED_UNICODE),
             'status' => 'sent',
             'sent_at' => Clock::utc(),
             'scheduled_at' => Clock::utc(),

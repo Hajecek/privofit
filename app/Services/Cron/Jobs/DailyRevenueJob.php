@@ -13,13 +13,10 @@ use App\Support\Clock;
 
 /**
  * Souhrn dnešní tržby pro administrátory. Jen v aplikaci, bez e-mailu.
- * INTERVAL_MINUTES = 5 je testovací kadence (cron už běží po 5 minutách).
- * Pro jeden souhrn denně nastavte 1440.
+ * Částka se při každém běhu cronu znovu spočítá z aktuálních plateb.
  */
 final class DailyRevenueJob implements CronJob
 {
-    public const INTERVAL_MINUTES = 5;
-
     public function __construct(
         private readonly Database $db,
         private readonly NotificationDispatcher $notify,
@@ -36,9 +33,44 @@ final class DailyRevenueJob implements CronJob
     {
         $now = $this->now ?? Clock::nowUtc();
         $local = $now->setTimezone(new \DateTimeZone(Clock::displayTimezone()));
+        $live = self::snapshot($this->db, $now);
+        $payload = [
+            'template' => 'admin-revenue',
+            'skip_email' => true,
+            'push_type' => 'admin.sync',
+            'report_day' => $live['day'],
+            'subject' => $live['subject'],
+            'body' => $live['body'],
+            'action_url' => CronText::link('/user/sprava'),
+        ];
+        $key = 'admin:revenue.today:' . $local->format('Y-m-d');
+        $existing = $this->db->fetch('SELECT id, status FROM cron_events WHERE event_key = :key', ['key' => $key]);
+        if (!$existing) {
+            $scheduled = $this->notify->schedule($key, 'admin', 'revenue.today', null, $payload);
+            return ['scheduled' => $scheduled ? 1 : 0];
+        }
+
+        $encoded = json_encode($payload, JSON_UNESCAPED_UNICODE);
+        if ($encoded !== false) {
+            $this->db->update('cron_events', [
+                'payload_json' => $encoded,
+            ], 'id = :id', ['id' => (int) $existing['id']]);
+        }
+        if ((string) $existing['status'] === 'dispatched') {
+            $this->refreshNotices($live);
+        }
+
+        return ['scheduled' => 0];
+    }
+
+    /** @return array{day:string,total:float,count:int,subject:string,body:string} */
+    public static function snapshot(Database $db, ?\DateTimeImmutable $now = null): array
+    {
+        $now = $now ?? Clock::nowUtc();
+        $local = $now->setTimezone(new \DateTimeZone(Clock::displayTimezone()));
         $start = Clock::toUtc($local->setTime(0, 0));
         $end = Clock::toUtc($local->setTime(0, 0)->modify('+1 day'));
-        $row = $this->db->fetch(
+        $row = $db->fetch(
             'SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS purchases
              FROM payments
              WHERE ' . PaymentService::revenueSql() . '
@@ -52,34 +84,49 @@ final class DailyRevenueJob implements CronJob
         $total = (float) ($row['total'] ?? 0);
         $count = (int) ($row['purchases'] ?? 0);
         $amount = money_format_czk($total);
-        $scheduled = $this->notify->schedule(
-            'admin:revenue.today:' . $this->slotKey($local),
-            'admin',
-            'revenue.today',
-            null,
-            [
-                'template' => 'admin-revenue',
-                'skip_email' => true,
-                'push_type' => 'admin.sync',
-                'subject' => ($count > 0 ? '💰 Dnešní tržba' : '🌱 Dnešní tržba') . ' · ' . $local->format('H:i'),
-                'body' => $this->body($amount, $count),
-                'action_url' => CronText::link('/user/sprava'),
-            ]
-        );
 
-        return ['scheduled' => $scheduled ? 1 : 0];
+        return [
+            'day' => $local->format('Y-m-d'),
+            'total' => $total,
+            'count' => $count,
+            'subject' => ($count > 0 ? '💰 Dnešní tržba' : '🌱 Dnešní tržba') . ' · ' . $local->format('H:i'),
+            'body' => self::bodyText($amount, $count),
+        ];
     }
 
-    private function body(string $amount, int $count): string
+    /** @param array{day:string,subject:string,body:string} $live */
+    private function refreshNotices(array $live): void
+    {
+        $rows = $this->db->fetchAll(
+            "SELECT id, payload_json FROM notifications WHERE template = 'admin-revenue' AND channel = 'in_app'"
+        );
+        foreach ($rows as $row) {
+            $payload = json_decode((string) ($row['payload_json'] ?? ''), true);
+            if (!is_array($payload) || (string) ($payload['report_day'] ?? '') !== $live['day']) {
+                continue;
+            }
+            $payload['subject'] = $live['subject'];
+            $payload['body'] = $live['body'];
+            $encoded = json_encode($payload, JSON_UNESCAPED_UNICODE);
+            if ($encoded === false) {
+                continue;
+            }
+            $this->db->update('notifications', [
+                'payload_json' => $encoded,
+            ], 'id = :id', ['id' => (int) $row['id']]);
+        }
+    }
+
+    private static function bodyText(string $amount, int $count): string
     {
         if ($count < 1) {
             return 'Takový je dnešní den: ' . $amount . '. Zatím žádný nákup. 🌱';
         }
 
-        return 'Takový je dnešní den: ' . $amount . ' (' . $count . ' ' . $this->purchaseWord($count) . '). Jedeme dál! 🔥';
+        return 'Takový je dnešní den: ' . $amount . ' (' . $count . ' ' . self::purchaseLabel($count) . '). Jedeme dál! 🔥';
     }
 
-    private function purchaseWord(int $count): string
+    private static function purchaseLabel(int $count): string
     {
         $mod100 = $count % 100;
         $mod10 = $count % 10;
@@ -93,17 +140,5 @@ final class DailyRevenueJob implements CronJob
         }
 
         return 'nákupů';
-    }
-
-    private function slotKey(\DateTimeImmutable $local): string
-    {
-        $interval = max(1, self::INTERVAL_MINUTES);
-        if ($interval >= 1440) {
-            return $local->format('Y-m-d');
-        }
-        $minutes = ((int) $local->format('H')) * 60 + (int) $local->format('i');
-        $bucket = intdiv($minutes, $interval) * $interval;
-
-        return $local->format('Y-m-d') . sprintf('T%02d:%02d', intdiv($bucket, 60), $bucket % 60);
     }
 }

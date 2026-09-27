@@ -204,7 +204,11 @@ final class NotificationDispatcher
             unset($payload['skip_email']);
             $this->mail->queue($template, $email, $payload, $userId);
         }
-        $this->push->notify($userId, $template, $title, $body, (string) ($payload['push_type'] ?? 'account.sync'));
+        $extra = [];
+        if (!empty($payload['report_day'])) {
+            $extra['report_day'] = (string) $payload['report_day'];
+        }
+        $this->push->notify($userId, $template, $title, $body, (string) ($payload['push_type'] ?? 'account.sync'), $extra);
     }
 
     private function allows(int $userId, string $preference): bool

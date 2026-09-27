@@ -15,6 +15,7 @@ use App\Services\Billing\PaymentService;
 use App\Services\Billing\StripeFee;
 use App\Services\Billing\StripeGateway;
 use App\Services\Content\ContentService;
+use App\Services\Cron\Jobs\DailyRevenueJob;
 use App\Services\MembershipService;
 use App\Services\ReservationService;
 use App\Support\Clock;
@@ -399,6 +400,14 @@ final class MobileApiService
         $items = [];
         foreach ($rows as $row) {
             $payload = json_decode((string) $row['payload_json'], true) ?: [];
+            if ((string) $row['template'] === 'admin-revenue') {
+                $created = Clock::toLocal((string) $row['created_at'])->format('Y-m-d');
+                if ($created === Clock::nowLocal()->format('Y-m-d')) {
+                    $live = DailyRevenueJob::snapshot($this->db);
+                    $payload['subject'] = $live['subject'];
+                    $payload['body'] = $live['body'];
+                }
+            }
             $items[] = [
                 'id' => (string) $row['id'],
                 'title' => (string) ($payload['subject'] ?? $row['template']),

@@ -330,7 +330,7 @@ final class CronNotificationTest extends TestCase
 
             $event = $this->db->fetch(
                 "SELECT event_key, audience, payload_json FROM cron_events WHERE event_key = :key",
-                ['key' => 'admin:revenue.today:2099-08-15T12:05']
+                ['key' => 'admin:revenue.today:2099-08-15']
             );
             $this->assertIsArray($event);
             $this->assertSame('admin', $event['audience']);
@@ -345,8 +345,16 @@ final class CronNotificationTest extends TestCase
             $this->assertSame(1, $this->countChannel($adminId, 'admin-revenue', 'in_app'));
             $this->assertSame(0, $this->countNotes($customerId, 'admin-revenue'));
 
+            $this->insertPayment($customerId, '100.00', 'paid', 'stripe', '2099-08-15 10:10:00');
             $again = new DailyRevenueJob($this->db, $notify, $now->modify('+5 minutes'));
-            $this->assertSame(1, $again->run()['scheduled']);
+            $this->assertSame(0, $again->run()['scheduled']);
+            $fresh = json_decode((string) $this->db->fetchColumn(
+                "SELECT payload_json FROM notifications WHERE user_id = :uid AND template = 'admin-revenue' AND channel = 'in_app'",
+                ['uid' => $adminId]
+            ), true);
+            $this->assertStringContainsString('1 350 Kč', (string) ($fresh['body'] ?? ''));
+            $this->assertStringContainsString('3 nákupy', (string) ($fresh['body'] ?? ''));
+            $this->assertSame(1, $this->countChannel($adminId, 'admin-revenue', 'in_app'));
 
             $quiet = new DailyRevenueJob(
                 $this->db,
@@ -356,7 +364,7 @@ final class CronNotificationTest extends TestCase
             $this->assertSame(1, $quiet->run()['scheduled']);
             $empty = json_decode((string) $this->db->fetchColumn(
                 'SELECT payload_json FROM cron_events WHERE event_key = :key',
-                ['key' => 'admin:revenue.today:2099-01-02T11:05']
+                ['key' => 'admin:revenue.today:2099-01-02']
             ), true);
             $this->assertSame('🌱 Dnešní tržba · 11:07', $empty['subject']);
             $this->assertStringContainsString('0 Kč', (string) $empty['body']);
