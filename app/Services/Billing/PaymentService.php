@@ -19,6 +19,44 @@ final class PaymentService
     {
     }
 
+    /**
+     * Sloupce, které vznikly později. Na produkci je stránka rezervací nesmí shodit,
+     * když migrace ještě neproběhla.
+     *
+     * @return array<string, true>
+     */
+    public function paymentColumnSet(): array
+    {
+        $names = [];
+        try {
+            foreach ($this->db->fetchAll('SHOW COLUMNS FROM payments') as $column) {
+                $names[(string) ($column['Field'] ?? '')] = true;
+            }
+        } catch (\Throwable) {
+            return [];
+        }
+
+        $missing = [
+            'fee_amount' => 'ALTER TABLE payments ADD COLUMN fee_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00',
+            'charged_amount' => 'ALTER TABLE payments ADD COLUMN charged_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00',
+            'stripe_details' => 'ALTER TABLE payments ADD COLUMN stripe_details MEDIUMTEXT DEFAULT NULL',
+            'metadata_json' => 'ALTER TABLE payments ADD COLUMN metadata_json MEDIUMTEXT DEFAULT NULL',
+        ];
+        foreach ($missing as $name => $sql) {
+            if ($name === '' || isset($names[$name])) {
+                continue;
+            }
+            try {
+                $this->db->query($sql);
+                $names[$name] = true;
+            } catch (\Throwable) {
+            }
+        }
+
+        unset($names['']);
+        return $names;
+    }
+
     public function createManual(array $user, string $amount, ?int $reservationId = null, ?int $membershipId = null): array
     {
         $id = (int) $this->db->insert('payments', [

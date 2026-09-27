@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controllers\Admin;
 
 use App\Controllers\Controller;
+use App\Core\Database;
 use App\Core\HttpException;
 use App\Core\Request;
 use App\Core\Response;
@@ -193,23 +194,25 @@ final class AdminController extends Controller
         $now = Clock::utc();
         $todayStart = Clock::toUtc(Clock::nowLocal()->setTime(0, 0))->format('Y-m-d H:i:s');
         $todayEnd = Clock::toUtc(Clock::nowLocal()->setTime(0, 0)->modify('+1 day'))->format('Y-m-d H:i:s');
+        $paymentColumns = (new PaymentService($db))->paymentColumnSet();
+        $paymentSelect = 'p.id AS payment_id, p.provider AS payment_provider, p.status AS payment_status,
+                       p.amount AS payment_amount, p.provider_reference';
+        foreach (['fee_amount', 'charged_amount', 'stripe_details'] as $column) {
+            if (isset($paymentColumns[$column])) {
+                $paymentSelect .= ', p.' . $column;
+            }
+        }
 
         $sql = "SELECT r.public_id, r.starts_at, r.ends_at, r.buffer_minutes, r.status, r.guest_count, r.price,
                        r.cancellation_reason, r.membership_id,
                        u.first_name, u.last_name, u.username, u.email, u.public_id AS user_public_id,
                        rm.name AS room_name,
-                       p.id AS payment_id, p.provider AS payment_provider, p.status AS payment_status,
-                       p.amount AS payment_amount, p.fee_amount, p.charged_amount, p.stripe_details,
-                       p.provider_reference
+                       {$paymentSelect}
                 FROM reservations r
                 LEFT JOIN users u ON u.id = r.user_id
                 LEFT JOIN rooms rm ON rm.id = r.room_id
                 LEFT JOIN payments p ON p.id = (
-                    SELECT p2.id FROM payments p2
-                    WHERE p2.reservation_id = r.id
-                       OR (p2.metadata_json IS NOT NULL AND p2.metadata_json LIKE CONCAT('%', r.public_id, '%'))
-                    ORDER BY p2.id DESC
-                    LIMIT 1
+                    SELECT MAX(p2.id) FROM payments p2 WHERE p2.reservation_id = r.id
                 )
                 WHERE r.status <> 'expired'";
         $params = [];
@@ -238,6 +241,9 @@ final class AdminController extends Controller
         };
         $sql .= ' LIMIT 200';
         $rows = $db->fetchAll($sql, $params);
+        if (isset($paymentColumns['metadata_json'])) {
+            $rows = $this->attachMetadataPayments($db, $rows, $paymentColumns);
+        }
         $stubs = [];
         foreach ($rows as $row) {
             if (($row['payment_provider'] ?? '') !== 'stripe' || empty($row['payment_id'])) {
@@ -250,7 +256,7 @@ final class AdminController extends Controller
                 'stripe_details' => $row['stripe_details'] ?? null,
             ];
         }
-        if ($stubs !== []) {
+        if ($stubs !== [] && isset($paymentColumns['stripe_details'])) {
             $filled = [];
             foreach ((new PaymentService($db))->withStripeFacts($stubs) as $payment) {
                 $filled[(int) $payment['id']] = $payment['stripe_details'] ?? null;
@@ -281,6 +287,75 @@ final class AdminController extends Controller
             'counts' => $counts,
             'pageScripts' => ['js/customers.js', 'js/payment-detail.js'],
         ]);
+    }
+
+    /**
+     * Platba za víc termínů najednou má reservation_id jen u prvního.
+     * Ostatní jsou v metadata_json.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @param array<string, true> $columns
+     * @return list<array<string, mixed>>
+     */
+    private function attachMetadataPayments(Database $db, array $rows, array $columns): array
+    {
+        $need = [];
+        foreach ($rows as $index => $row) {
+            if (!empty($row['payment_id'])) {
+                continue;
+            }
+            $publicId = (string) ($row['public_id'] ?? '');
+            if (preg_match('/^[0-9a-f-]{36}$/i', $publicId) !== 1) {
+                continue;
+            }
+            $need[$publicId] = $index;
+        }
+        if ($need === []) {
+            return $rows;
+        }
+
+        $select = 'id, provider, status, amount, provider_reference, metadata_json';
+        foreach (['fee_amount', 'charged_amount', 'stripe_details'] as $column) {
+            if (isset($columns[$column])) {
+                $select .= ', ' . $column;
+            }
+        }
+        $likes = [];
+        $params = [];
+        $i = 0;
+        foreach (array_keys($need) as $publicId) {
+            $key = 'p' . $i;
+            $likes[] = 'metadata_json LIKE :' . $key;
+            $params[$key] = '%' . $publicId . '%';
+            $i++;
+        }
+        $found = $db->fetchAll(
+            'SELECT ' . $select . ' FROM payments WHERE metadata_json IS NOT NULL AND (' . implode(' OR ', $likes) . ') ORDER BY id DESC',
+            $params
+        );
+        $used = [];
+        foreach ($found as $payment) {
+            $meta = json_decode((string) ($payment['metadata_json'] ?? ''), true);
+            $ids = is_array($meta['reservations'] ?? null) ? $meta['reservations'] : [];
+            foreach ($ids as $publicId) {
+                $publicId = (string) $publicId;
+                if (!isset($need[$publicId]) || isset($used[$publicId])) {
+                    continue;
+                }
+                $used[$publicId] = true;
+                $index = $need[$publicId];
+                $rows[$index]['payment_id'] = $payment['id'];
+                $rows[$index]['payment_provider'] = $payment['provider'] ?? '';
+                $rows[$index]['payment_status'] = $payment['status'] ?? '';
+                $rows[$index]['payment_amount'] = $payment['amount'] ?? null;
+                $rows[$index]['provider_reference'] = $payment['provider_reference'] ?? '';
+                if (isset($columns['stripe_details'])) {
+                    $rows[$index]['stripe_details'] = $payment['stripe_details'] ?? null;
+                }
+            }
+        }
+
+        return $rows;
     }
 
     public function cancelReservation(Request $request, array $params): never

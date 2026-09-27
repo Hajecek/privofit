@@ -40,9 +40,7 @@ if (!empty($facts['refunded'])) {
 } elseif (($facts['charge_status'] ?? '') !== '') {
     $statusBits[] = (string) $facts['charge_status'];
 }
-if (($facts['balance_status'] ?? '') === 'pending') {
-    $statusBits[] = 'výplata čeká';
-} elseif (($facts['balance_status'] ?? '') === 'available') {
+if (($facts['balance_status'] ?? '') === 'available') {
     $statusBits[] = 'připsáno';
 }
 $risk = (string) ($facts['risk_level'] ?? '');
@@ -84,14 +82,14 @@ if (!empty($facts['missing'])) {
 } elseif ($factsMode === 'columns' || (string) ($payment['status'] ?? '') !== '') {
     $statusHtml .= '<span class="muted">' . e((string) ($payment['status'] ?? '—')) . '</span>';
 }
-if ((float) ($facts['fee'] ?? 0) > 0 || (float) ($facts['net'] ?? 0) > 0) {
-    $statusHtml .= '<div class="muted">poplatek ' . e(number_format((float) $facts['fee'], 2, ',', ' ')) . ' Kč · čistě ' . e(number_format((float) $facts['net'], 2, ',', ' ')) . ' Kč</div>';
+if ((float) ($facts['fee'] ?? 0) > 0) {
+    $statusHtml .= '<div class="muted">za platbu kartou ' . e(number_format((float) $facts['fee'], 2, ',', ' ')) . ' Kč</div>';
+}
+if ((float) ($facts['net'] ?? 0) > 0) {
+    $statusHtml .= '<div class="muted">čistě ' . e(number_format((float) $facts['net'], 2, ',', ' ')) . ' Kč</div>';
 }
 if ((float) ($facts['amount_refunded'] ?? 0) > 0) {
     $statusHtml .= '<div class="muted">vráceno ' . e(number_format((float) $facts['amount_refunded'], 2, ',', ' ')) . ' Kč</div>';
-}
-if (($facts['available_on'] ?? '') !== '' && ($facts['balance_status'] ?? '') === 'pending') {
-    $statusHtml .= '<div class="muted">výplata ' . e(format_datetime((string) $facts['available_on'])) . '</div>';
 }
 if (($facts['receipt_url'] ?? '') !== '') {
     $statusHtml .= '<a href="' . e((string) $facts['receipt_url']) . '" target="_blank" rel="noopener">Účtenka</a>';
@@ -148,11 +146,8 @@ $progress = array_values(array_filter(
     static fn (string $bit): bool => $bit !== $pill && $bit !== 'Zaplaceno'
 ));
 $addDetail('Průběh', implode(' · ', $progress));
-$addDetail('Poplatek', $money($facts['fee'] ?? 0));
+$addDetail('Za platbu kartou', $money($facts['fee'] ?? 0));
 $addDetail('Vráceno', $money($facts['amount_refunded'] ?? 0));
-if (($facts['available_on'] ?? '') !== '' && ($facts['balance_status'] ?? '') === 'pending') {
-    $addDetail('Výplata', format_datetime((string) $facts['available_on']));
-}
 $receipt = (string) ($facts['receipt_url'] ?? '');
 if (!str_starts_with($receipt, 'https://')) {
     $receipt = '';

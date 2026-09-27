@@ -27,6 +27,7 @@ $hideChrome = $hideChrome ?? str_contains((string) $bodyClass, 'standalone-');
     <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="<?= e(url('/assets/marketing/style.css')) ?>?v=42">
     <link rel="manifest" href="<?= e(url('/manifest.json')) ?>">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="PRIVOFIT">
 </head>

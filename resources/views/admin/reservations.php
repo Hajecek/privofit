@@ -108,7 +108,8 @@ $queryBase = static function (string $key, string $q): string {
                 <td><?= e((string) ($row['room_name'] ?? 'Studio')) ?></td>
                 <td><span class="badge <?= e($statusClass) ?>"><?= e($statusLabel) ?></span></td>
                 <td class="pay-facts">
-                    <div><?= e(money_format_czk($row['price'] ?? 0)) ?></div>
+                    <div class="pay-price">
+                    <span><?= e(money_format_czk($row['price'] ?? 0)) ?></span>
                     <?php if (!empty($row['payment_id'])): ?>
                         <?php
                         $payment = [
@@ -123,6 +124,7 @@ $queryBase = static function (string $key, string $q): string {
                     <?php elseif (!empty($row['membership_id'])): ?>
                         <span class="muted">členství</span>
                     <?php endif; ?>
+                    </div>
                 </td>
                 <td class="interest-actions">
                     <?php if ($canCancel): ?>

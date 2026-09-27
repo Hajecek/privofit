@@ -243,6 +243,7 @@ final class Application
             'debug' => (bool) $this->config('app.debug', false),
             'page' => 'error',
             'bodyClass' => 'standalone-error',
+            'cspNonce' => (string) Session::get('_csp_nonce', ''),
         ], 'layouts/brand'), $status);
     }
 

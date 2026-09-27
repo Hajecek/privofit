@@ -2602,7 +2602,13 @@ td.pay-facts,
   min-width: 140px;
   vertical-align: top;
 }
-td.pay-facts .pay-chip { margin-top: 6px; }
+.pay-price {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+td.pay-facts .pay-chip { margin-top: 0; }
 .pay-chip {
   display: inline-flex;
   align-items: center;

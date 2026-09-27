@@ -14,12 +14,13 @@ $bodyClass = $bodyClass ?? '';
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="<?= e(asset('user/style.css')) ?>?v=104">
+    <link rel="stylesheet" href="<?= e(asset('user/style.css')) ?>?v=105">
     <link rel="manifest" href="<?= e(url('/manifest.json')) ?>">
     <link rel="icon" href="<?= e(url('/favicon.ico')) ?>?v=3" sizes="any">
     <link rel="icon" type="image/png" sizes="32x32" href="<?= e(asset('brand/favicon-32.png')) ?>?v=3">
     <link rel="icon" type="image/png" sizes="48x48" href="<?= e(asset('brand/favicon-48.png')) ?>?v=3">
     <link rel="apple-touch-icon" href="<?= e(asset('icons/apple-touch-icon.png')) ?>?v=3">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="PRIVOFIT">
 </head>
