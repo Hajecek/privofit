@@ -108,6 +108,12 @@
     window.addEventListener("resize", paintDonut);
   }
 
+  const loadBar = document.querySelector(".adash-load");
+  if (loadBar) {
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.setTimeout(() => loadBar.classList.add("is-quiet"), reduceMotion ? 0 : 1600);
+  }
+
   const dash = document.querySelector("[data-dash-root]");
   const liveUrl = dash?.getAttribute("data-dash-url") || "";
   if (!dash || !liveUrl) return;
@@ -123,10 +129,6 @@
       return "";
     }
     return "";
-  };
-  const badgeClass = (value) => {
-    const allowed = ["badge-warn", "badge-muted", "badge-done", "badge-ok"];
-    return allowed.includes(value) ? value : "badge-muted";
   };
   const kindClass = (value) => (/^is-[a-z]+$/.test(String(value || "")) ? String(value) : "");
   const toneClass = (value) => (value === "bad" || value === "warn" ? "is-" + value : "");
@@ -270,64 +272,11 @@
     return tip;
   };
 
-  const scheduleAvatar = (row) => {
-    const avatarUrl = safeUrl(row.avatar);
-    if (!avatarUrl) return null;
-    const img = document.createElement("img");
-    img.className = "sched-avatar";
-    img.alt = "";
-    img.src = avatarUrl;
-    return img;
-  };
-
-  const scheduleRow = (row) => {
-    const state = scheduleState(row.state || (row.live ? "live" : row.past ? "past" : "next"));
-    const item = document.createElement("li");
-    item.className = "sched-row is-" + state;
-    const avatar = scheduleAvatar(row);
-    if (avatar) item.append(avatar);
-    const time = document.createElement("time");
-    const start = document.createElement("strong");
-    start.textContent = String(row.time || "");
-    const end = document.createElement("span");
-    end.textContent = String(row.end || "");
-    time.append(start, end);
-    const copy = document.createElement("div");
-    copy.className = "sched-copy";
-    const href = safeUrl(row.href);
-    const who = href ? document.createElement("a") : document.createElement("strong");
-    if (href) who.setAttribute("href", href);
-    who.textContent = String(row.name || "Zákazník");
-    const meta = document.createElement("span");
-    meta.textContent = String(row.meta || "");
-    copy.append(who, meta);
-    const side = document.createElement("div");
-    side.className = "sched-side";
-    const badge = document.createElement("span");
-    badge.className = "badge " + badgeClass(row.badge_class);
-    badge.textContent = String(row.badge || "");
-    side.append(badge);
-    const cancelUrl = safeUrl(row.cancel_url);
-    if (cancelUrl) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "btn btn-danger btn-sm";
-      button.setAttribute("data-cust-open", "cancel-reservation");
-      button.setAttribute("data-name", String(row.cancel_name || row.name || ""));
-      button.setAttribute("data-action", cancelUrl);
-      button.textContent = "Zrušit";
-      side.append(button);
-    }
-    item.append(time, copy, scheduleTip(row, true), side);
-    return item;
-  };
-
   const renderSchedule = (schedule) => {
     const body = document.querySelector("[data-dash-schedule-body]");
     if (!body) return;
     const modal = document.querySelector("[data-cust-modal]");
     if (modal && !modal.hidden) return;
-    const pastOpen = body.querySelector(".sched-done")?.open === true;
     body.replaceChildren();
     const items = Array.isArray(schedule?.items) ? schedule.items : [];
     if (items.length === 0) {
@@ -337,29 +286,8 @@
       body.append(empty);
       return;
     }
-    const active = items.filter((row) => scheduleState(row.state || (row.past ? "past" : "next")) !== "past");
-    const past = items.filter((row) => scheduleState(row.state || (row.past ? "past" : "next")) === "past");
     const wrap = document.createElement("div");
     wrap.className = "sched";
-    const counts = schedule?.counts && typeof schedule.counts === "object" ? schedule.counts : {};
-    const stats = document.createElement("div");
-    stats.className = "sched-stats";
-    [
-      ["live", "teď", "live"],
-      ["next", "čeká", "next"],
-      ["pay", "platba", "pay"],
-      ["past", "hotovo", "past"],
-    ].forEach(([key, label, tone]) => {
-      const count = Number(counts[key]) || 0;
-      if (count < 1) return;
-      const stat = document.createElement("span");
-      stat.className = "sched-stat is-" + tone;
-      const strong = document.createElement("strong");
-      strong.textContent = String(count);
-      stat.append(strong, document.createTextNode(" " + label));
-      stats.append(stat);
-    });
-    wrap.append(stats);
     const windowData = schedule?.window && typeof schedule.window === "object" ? schedule.window : {};
     const rail = document.createElement("div");
     rail.className = "sched-rail";
@@ -394,7 +322,7 @@
       hair.style.left = Math.max(0, Math.min(100, Number(tick.left) || 0)) + "%";
       track.append(hair);
     });
-    items.forEach((row) => {
+    items.forEach((row, index) => {
       const left = Math.max(0, Math.min(100, Number(row.left) || 0));
       const width = Math.max(1.4, Math.min(100 - left, Number(row.width) || 1.4));
       const center = left + width / 2;
@@ -404,6 +332,7 @@
       block.className = "sched-mark is-" + scheduleState(row.state || (row.live ? "live" : row.past ? "past" : "next")) + " is-tip-" + align;
       block.style.left = left + "%";
       block.style.width = width + "%";
+      block.style.setProperty("--mark", String(index));
       if (href) block.setAttribute("href", href);
       else block.tabIndex = 0;
       const label = [String(row.name || "Zákazník"), String(row.time || "") + "–" + String(row.end || "")].filter(Boolean).join(", ");
@@ -419,27 +348,6 @@
     }
     rail.append(labels, track);
     wrap.append(rail);
-    if (active.length > 0) {
-      const list = document.createElement("ul");
-      list.className = "sched-list";
-      active.forEach((row) => list.append(scheduleRow(row)));
-      wrap.append(list);
-    }
-    if (past.length > 0) {
-      const done = document.createElement("details");
-      done.className = "sched-done";
-      done.open = pastOpen || active.length === 0;
-      const summary = document.createElement("summary");
-      summary.append(document.createTextNode("Hotovo "));
-      const count = document.createElement("span");
-      count.textContent = String(past.length);
-      summary.append(count);
-      const list = document.createElement("ul");
-      list.className = "sched-list is-done";
-      past.forEach((row) => list.append(scheduleRow(row)));
-      done.append(summary, list);
-      wrap.append(done);
-    }
     body.append(wrap);
   };
 

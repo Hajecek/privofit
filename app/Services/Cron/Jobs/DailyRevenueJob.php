@@ -13,10 +13,12 @@ use App\Support\Clock;
 
 /**
  * Souhrn dnešní tržby pro administrátory. Jen v aplikaci, bez e-mailu.
- * Částka se při každém běhu cronu znovu spočítá z aktuálních plateb.
+ * Každých 5 minut odejde nová notifikace s částkou spočítanou z aktuálních plateb daného dne.
  */
 final class DailyRevenueJob implements CronJob
 {
+    public const INTERVAL_MINUTES = 5;
+
     public function __construct(
         private readonly Database $db,
         private readonly NotificationDispatcher $notify,
@@ -34,33 +36,23 @@ final class DailyRevenueJob implements CronJob
         $now = $this->now ?? Clock::nowUtc();
         $local = $now->setTimezone(new \DateTimeZone(Clock::displayTimezone()));
         $live = self::snapshot($this->db, $now);
-        $payload = [
-            'template' => 'admin-revenue',
-            'skip_email' => true,
-            'push_type' => 'admin.sync',
-            'report_day' => $live['day'],
-            'subject' => $live['subject'],
-            'body' => $live['body'],
-            'action_url' => CronText::link('/user/sprava'),
-        ];
-        $key = 'admin:revenue.today:' . $local->format('Y-m-d');
-        $existing = $this->db->fetch('SELECT id, status FROM cron_events WHERE event_key = :key', ['key' => $key]);
-        if (!$existing) {
-            $scheduled = $this->notify->schedule($key, 'admin', 'revenue.today', null, $payload);
-            return ['scheduled' => $scheduled ? 1 : 0];
-        }
+        $scheduled = $this->notify->schedule(
+            'admin:revenue.today:' . $this->slotKey($local),
+            'admin',
+            'revenue.today',
+            null,
+            [
+                'template' => 'admin-revenue',
+                'skip_email' => true,
+                'push_type' => 'admin.sync',
+                'report_day' => $live['day'],
+                'subject' => $live['subject'],
+                'body' => $live['body'],
+                'action_url' => CronText::link('/user/sprava'),
+            ]
+        );
 
-        $encoded = json_encode($payload, JSON_UNESCAPED_UNICODE);
-        if ($encoded !== false) {
-            $this->db->update('cron_events', [
-                'payload_json' => $encoded,
-            ], 'id = :id', ['id' => (int) $existing['id']]);
-        }
-        if ((string) $existing['status'] === 'dispatched') {
-            $this->refreshNotices($live);
-        }
-
-        return ['scheduled' => 0];
+        return ['scheduled' => $scheduled ? 1 : 0];
     }
 
     /** @return array{day:string,total:float,count:int,subject:string,body:string} */
@@ -94,29 +86,6 @@ final class DailyRevenueJob implements CronJob
         ];
     }
 
-    /** @param array{day:string,subject:string,body:string} $live */
-    private function refreshNotices(array $live): void
-    {
-        $rows = $this->db->fetchAll(
-            "SELECT id, payload_json FROM notifications WHERE template = 'admin-revenue' AND channel = 'in_app'"
-        );
-        foreach ($rows as $row) {
-            $payload = json_decode((string) ($row['payload_json'] ?? ''), true);
-            if (!is_array($payload) || (string) ($payload['report_day'] ?? '') !== $live['day']) {
-                continue;
-            }
-            $payload['subject'] = $live['subject'];
-            $payload['body'] = $live['body'];
-            $encoded = json_encode($payload, JSON_UNESCAPED_UNICODE);
-            if ($encoded === false) {
-                continue;
-            }
-            $this->db->update('notifications', [
-                'payload_json' => $encoded,
-            ], 'id = :id', ['id' => (int) $row['id']]);
-        }
-    }
-
     private static function bodyText(string $amount, int $count): string
     {
         if ($count < 1) {
@@ -140,5 +109,17 @@ final class DailyRevenueJob implements CronJob
         }
 
         return 'nákupů';
+    }
+
+    private function slotKey(\DateTimeImmutable $local): string
+    {
+        $interval = max(1, self::INTERVAL_MINUTES);
+        if ($interval >= 1440) {
+            return $local->format('Y-m-d');
+        }
+        $minutes = ((int) $local->format('H')) * 60 + (int) $local->format('i');
+        $bucket = intdiv($minutes, $interval) * $interval;
+
+        return $local->format('Y-m-d') . sprintf('T%02d:%02d', intdiv($bucket, 60), $bucket % 60);
     }
 }
