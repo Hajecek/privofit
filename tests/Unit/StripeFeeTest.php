@@ -70,12 +70,19 @@ final class StripeFeeTest extends TestCase
         $this->assertFalse($inspected['assumed']);
     }
 
-    public function testShownAmountStaysWhenCardWouldBeCheaper(): void
+    public function testApplePayCzechCardOn1490UsesEuropeanFee(): void
     {
-        $link = StripeFee::coverFor('1100.00', 'US');
-        $kept = StripeFee::forShownMinor('1100.00', $link['chargeMinor']);
-        $this->assertSame('1142.49', $kept['charge']);
-        $this->assertNull(StripeFee::forShownMinor('1100.00', 1));
+        $priced = StripeFee::coverForMethod('1490.00', [
+            'type' => 'card',
+            'card' => [
+                'country' => 'CZ',
+                'brand' => 'visa',
+                'wallet' => ['type' => 'apple_pay'],
+            ],
+        ]);
+        $this->assertSame('29.29', $priced['fee']);
+        $this->assertSame('1519.29', $priced['charge']);
+        $this->assertSame('1545.17', StripeFee::coverFor('1490.00', 'US')['charge']);
     }
 
     public function testEmptyCountryStaysEuropean(): void

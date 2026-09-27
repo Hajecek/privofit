@@ -43,6 +43,7 @@ final class PayController extends Controller
                 (string) $request->input('confirmation_token', ''),
                 (int) $request->input('shown_minor', 0),
                 $this->app,
+                (string) $request->input('payment_method', ''),
             );
         } catch (HttpException $e) {
             $this->jsonError($e->getMessage(), $e->status);

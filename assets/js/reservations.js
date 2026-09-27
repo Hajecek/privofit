@@ -50,7 +50,7 @@
 
   const step = () => Number(state.availability.duration_step_minutes || 60);
   const minMinutes = () => Number(state.availability.min_minutes || 60);
-  const maxMinutes = () => Number(state.availability.max_minutes || 180);
+  const maxMinutes = () => Number(state.availability.max_minutes || 1440);
   const maxHours = () => Math.max(1, Math.floor(maxMinutes() / step()));
   const maxPersons = () => Number(state.availability.max_persons || 2);
   const hourly = () => Number(state.availability.hourly_price || 150);
@@ -92,9 +92,9 @@
   const pad = (n) => String(n).padStart(2, "0");
   const money = (n) => Math.round(Number(n) || 0).toLocaleString("cs-CZ") + "\u00a0Kč";
   const blocksWord = (count) => {
-    if (count === 1) return "1 blok";
-    if (count >= 2 && count <= 4) return count + " bloky";
-    return count + " bloků";
+    if (count === 1) return "1 okénko";
+    if (count >= 2 && count <= 4) return count + " okénka";
+    return count + " okének";
   };
   const parseDate = (value) => {
     const [y, m, d] = String(value || "").split("-").map((part) => parseInt(part, 10));
@@ -151,17 +151,31 @@
     const start = minutes(row.start);
     return start >= minutes(first.start) && start < minutes(occupyEnd());
   };
-  const extensionRow = () => {
+  const hoursCovering = (row) => {
     const first = state.selected[0];
-    if (!first || state.hours >= maxHours()) return null;
-    const nextHours = state.hours + 1;
-    if (!availableFor(first).includes(nextHours * step())) return null;
-    const from = minutes(occupyEnd());
-    const until = minutes(addMinutesToTime(first.start, occupyMinutes(nextHours)));
-    return bookableRows().find((row) => {
-      const start = minutes(row.start);
-      return start >= from && start < until;
-    }) || null;
+    if (!first || !row || row.kind === "buffer") return 0;
+    const delta = minutes(row.start) - minutes(first.start);
+    const block = blockMinutes();
+    if (delta <= 0 || block < 1 || delta % block !== 0) return 0;
+    return delta / block + 1;
+  };
+  const extendHours = (row) => {
+    const target = hoursCovering(row);
+    const first = state.selected[0];
+    if (!first || target <= state.hours) return 0;
+    if (target > maxHours()) return 0;
+    if (!availableFor(first).includes(target * step())) return 0;
+    return target;
+  };
+  const maxSelectable = () => {
+    const first = state.selected[0];
+    if (!first) return 1;
+    let max = 1;
+    availableFor(first).forEach((minutesValue) => {
+      const hours = minutesValue / step();
+      if (hours > max && hours <= maxHours()) max = hours;
+    });
+    return max;
   };
 
   const setSelection = (rows, hours) => {
@@ -184,9 +198,9 @@
       setSelection(state.hours === 1 ? [] : [first], 1);
       return;
     }
-    const extra = extensionRow();
-    if (extra && row.start === extra.start) {
-      setSelection([first], state.hours + 1);
+    const extra = extendHours(row);
+    if (extra > 0) {
+      setSelection([first], extra);
       return;
     }
     if (inRange(row)) {
@@ -204,8 +218,9 @@
   const setHours = (count) => {
     const first = state.selected[0];
     if (!first) return;
-    if (!availableFor(first).includes(count * step())) return;
-    setSelection([first], count);
+    const next = Math.max(1, Math.min(count, maxSelectable()));
+    if (!availableFor(first).includes(next * step())) return;
+    setSelection([first], next);
   };
 
   const updateForm = () => {
@@ -223,19 +238,18 @@
     if (row.kind === "buffer") return "buffer";
     if (row.mine || row.kind === "mine") return "mine";
     if (inRange(row)) return "selected";
-    const extra = extensionRow();
-    if (extra && row.start === extra.start) return "add";
+    if (extendHours(row) > 0) return "add";
     if (row.past || row.kind === "past") return "past";
     if (!row.available || row.kind === "busy") return "busy";
     return "free";
   };
 
-  const hourMeta = (kind) => {
+  const hourMeta = (row, kind) => {
     if (kind === "mine") return "Tvoje";
     if (kind === "past") return "Už bylo";
     if (kind === "busy") return "Obsazeno";
     if (kind === "selected") return "Vybrané";
-    if (kind === "add") return "Přidat blok";
+    if (kind === "add") return extendHours(row) === state.hours + 1 ? "Přidat okénko" : "Až sem";
     if (kind === "buffer") return "Úklid";
     return "Volné";
   };
@@ -251,7 +265,7 @@
       (disabled ? " disabled" : "") +
       ' aria-pressed="' + (selected ? "true" : "false") + '">' +
       '<span class="hour-time">' + row.start + "<small>" + row.end + "</small></span>" +
-      '<span class="hour-meta">' + hourMeta(kind) + (kind === "free" || kind === "selected" || kind === "add" ? " · " + money(rate()) : "") + "</span>" +
+      '<span class="hour-meta">' + hourMeta(row, kind) + (kind === "free" || kind === "selected" || kind === "add" ? " · " + money(rate()) : "") + "</span>" +
       "</button>"
     );
   };
@@ -317,7 +331,7 @@
         hintEl.textContent = "Načítám volné hodiny…";
       } else {
         hintEl.textContent = free
-          ? "Každý blok je 1 h 15 min. Dva nebo tři bloky zůstanou celé, časy se nepřepočítávají."
+          ? "Každý blok je 1 h 15 min. Okének za sebou můžeš vybrat víc, klidně na celý volný den."
           : "Na tenhle den už volný blok nezbývá.";
       }
     }
@@ -361,12 +375,18 @@
       payBtn.classList.toggle("btn-primary", !covered);
       payBtn.classList.toggle("btn-secondary", covered);
     }
-    bar.querySelectorAll("[data-hours]").forEach((btn) => {
-      const value = parseInt(btn.getAttribute("data-hours") || "1", 10);
-      const allowed = availableFor(first).includes(value * step());
-      btn.disabled = !allowed;
-      btn.classList.toggle("is-on", value === count);
-    });
+    const maxCount = maxSelectable();
+    const countEl = bar.querySelector("[data-hours-count]");
+    const minus = bar.querySelector("[data-hours-minus]");
+    const plus = bar.querySelector("[data-hours-plus]");
+    const all = bar.querySelector("[data-hours-all]");
+    if (countEl) countEl.textContent = blocksWord(count);
+    if (minus) minus.disabled = count <= 1;
+    if (plus) plus.disabled = count >= maxCount;
+    if (all) {
+      all.disabled = maxCount <= 1 || count >= maxCount;
+      all.classList.toggle("is-on", maxCount > 1 && count >= maxCount);
+    }
   };
 
   const setLoading = (loading) => {
@@ -537,9 +557,9 @@
   });
 
   bar?.querySelector("[data-clear]")?.addEventListener("click", () => setSelection([], 1));
-  bar?.querySelectorAll("[data-hours]")?.forEach((btn) => {
-    btn.addEventListener("click", () => setHours(parseInt(btn.getAttribute("data-hours") || "1", 10)));
-  });
+  bar?.querySelector("[data-hours-minus]")?.addEventListener("click", () => setHours(state.hours - 1));
+  bar?.querySelector("[data-hours-plus]")?.addEventListener("click", () => setHours(state.hours + 1));
+  bar?.querySelector("[data-hours-all]")?.addEventListener("click", () => setHours(maxSelectable()));
   bar?.querySelector("[data-guest-minus]")?.addEventListener("click", () => {
     state.guests = Math.max(1, state.guests - 1);
     updateForm();

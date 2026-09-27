@@ -140,7 +140,12 @@
     await quoteReady;
     let data = await authorize();
     if (!data) return false;
-    if (!data.ready && !options.keepAmount) {
+    if (!data.ready && options.keepAmount) {
+      await useQuote(data);
+      showError("Poplatek u téhle karty je jiný. Částka dole už sedí, potvrď platbu znovu.");
+      return false;
+    }
+    if (!data.ready) {
       await useQuote(data);
       data = await authorize();
       if (!data) return false;

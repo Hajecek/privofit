@@ -34,7 +34,7 @@ final class ReservationService
         $room = $this->room($roomId);
         $slotMinutes = $this->slotMinutes();
         $minMinutes = $this->settings->int('reservation.min_minutes', 60);
-        $maxMinutes = $this->settings->int('reservation.max_minutes', 180);
+        $maxMinutes = $this->settings->int('reservation.max_minutes', 1440);
         $durationStep = $this->durationStep();
         $buffer = $this->bufferMinutes();
         $maxPersons = (int) $room['max_persons'];
@@ -60,6 +60,8 @@ final class ReservationService
 
         $open = Clock::parseLocal($localDate . ' ' . $hours['opens_at']);
         $close = Clock::parseLocal($localDate . ' ' . $hours['closes_at']);
+        $maxMinutes = $this->allowedTrainingMinutes($open, $close);
+        $meta['max_minutes'] = $maxMinutes;
         $nowLocal = Clock::nowLocal();
         $occupied = $this->occupiedIntervals(
             (int) $room['id'],
@@ -228,10 +230,9 @@ final class ReservationService
 
         $room = $this->room($roomId);
         $min = $this->settings->int('reservation.min_minutes', 60);
-        $max = $this->settings->int('reservation.max_minutes', 180);
         $buffer = $this->bufferMinutes();
         $durationStep = $this->durationStep();
-        if ($durationMinutes < $min || $durationMinutes > $max || $durationMinutes % $durationStep !== 0) {
+        if ($durationMinutes < $min || $durationMinutes % $durationStep !== 0) {
             throw new HttpException(422, 'Neplatná délka rezervace.');
         }
         if ($guestCount < 1 || $guestCount > (int) $room['max_persons']) {
@@ -253,6 +254,9 @@ final class ReservationService
         }
         $open = Clock::parseLocal($startLocal->format('Y-m-d') . ' ' . $hours['opens_at']);
         $close = Clock::parseLocal($startLocal->format('Y-m-d') . ' ' . $hours['closes_at']);
+        if ($durationMinutes > $this->allowedTrainingMinutes($open, $close)) {
+            throw new HttpException(422, 'Neplatná délka rezervace.');
+        }
         $occupiedUntil = $endLocal->modify('+' . $buffer . ' minutes');
         if ($startLocal < $open || $occupiedUntil > $close) {
             throw new HttpException(422, 'Termín je mimo provozní dobu.');
@@ -1333,6 +1337,24 @@ final class ReservationService
     private function durationStep(): int
     {
         return 60;
+    }
+
+    /** Nejdelší trénink, který se vejde do otevírací doby a do nastaveného stropu. */
+    private function allowedTrainingMinutes(\DateTimeImmutable $open, \DateTimeImmutable $close): int
+    {
+        $step = max(1, $this->durationStep());
+        $block = $step + $this->bufferMinutes();
+        if ($block < 1) {
+            $block = $step;
+        }
+        $span = max(0, (int) round(($close->getTimestamp() - $open->getTimestamp()) / 60));
+        $blocks = intdiv($span, $block);
+        $dayMax = max($step, $blocks * $step);
+        $configured = $this->settings->int('reservation.max_minutes', $dayMax);
+        if ($configured < $step) {
+            return $dayMax;
+        }
+        return min($configured, $dayMax);
     }
 
     private function blocksPhrase(int $blocks): string

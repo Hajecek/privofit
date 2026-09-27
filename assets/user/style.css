@@ -1334,21 +1334,29 @@ body.side-collapsed .side-menu:focus-within {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
-.booker-durations > span {
+.booker-durations > span,
+.booker-durations strong {
   color: var(--secondary);
   font-size: .78rem;
   font-weight: 700;
 }
+.booker-durations strong {
+  min-width: 5.2rem;
+  color: var(--fog);
+  text-align: center;
+}
 .booker-durations button {
-  min-width: 44px;
-  height: 36px;
+  min-width: 32px;
+  height: 32px;
   padding: 0 10px;
-  border-radius: 11px;
+  border-radius: 10px;
   border: 1px solid var(--line);
   background: transparent;
   font-weight: 700;
 }
+.booker-durations [data-hours-all] { min-width: auto; }
 .booker-durations button.is-on {
   border-color: var(--lime);
   background: var(--lime);
@@ -1808,11 +1816,12 @@ a.card:hover { color: inherit; border-color: #c6f21a88; }
     padding: 12px;
   }
   .booker-bar-copy { flex: 1 1 calc(100% - 52px); }
+  .booker-durations { flex: 1 1 100%; }
   .booker-guests { margin-left: auto; }
   .booker-actions { width: 100%; }
   .booker-actions .btn,
   .booker-bar .btn { width: 100%; }
-  body.user-app:has(.booker-bar.is-on) .app-main { padding-bottom: 220px; }
+  body.user-app:has(.booker-bar.is-on) .app-main { padding-bottom: 320px; }
   .res-card { grid-template-columns: 64px minmax(0, 1fr); }
   .res-actions { grid-column: 2; justify-content: flex-start; }
 }
@@ -5302,33 +5311,10 @@ body.user-app:has(.profile-save.is-on) .app-main { padding-bottom: 140px; }
   padding: 28px;
 }
 .pay-summary { min-width: 0; }
-.pay-total {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--line);
-}
-.pay-total span {
-  color: var(--secondary);
-  font-size: .78rem;
-  font-weight: 700;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-.pay-total strong {
-  font-family: var(--display);
-  font-size: clamp(2rem, 5vw, 2.7rem);
-  font-weight: 800;
-  letter-spacing: -0.05em;
-  line-height: .95;
-  white-space: nowrap;
-}
 .pay-lines {
   display: grid;
   gap: 10px;
-  margin: 16px 0 0;
+  margin: 0;
 }
 .pay-lines > div {
   display: flex;
@@ -5382,11 +5368,45 @@ body.user-app:has(.profile-save.is-on) .app-main { padding-bottom: 140px; }
 #payment-element {
   margin-top: 4px;
 }
+.pay-payoff {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 8px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.pay-due {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.pay-due span {
+  color: var(--secondary);
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.pay-due strong {
+  color: var(--lime);
+  font-family: var(--display);
+  font-size: clamp(2rem, 5vw, 2.7rem);
+  font-weight: 800;
+  letter-spacing: -0.05em;
+  line-height: .95;
+  white-space: nowrap;
+}
 .pay-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-top: 16px;
+  margin: 0;
+  min-width: min(100%, 280px);
 }
 .pay-actions .button { flex: 1; }
 @media (max-width: 860px) {
@@ -5401,4 +5421,9 @@ body.user-app:has(.profile-save.is-on) .app-main { padding-bottom: 140px; }
     border-left: 0;
     border-top: 1px solid var(--line);
   }
+  .pay-payoff {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .pay-actions { min-width: 0; }
 }

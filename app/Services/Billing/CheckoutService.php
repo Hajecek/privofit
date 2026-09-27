@@ -178,7 +178,7 @@ final class CheckoutService
      *
      * @return array<string, mixed>
      */
-    public function confirm(array $user, string $publicId, string $confirmationTokenId, int $shownMinor, Application $app): array
+    public function confirm(array $user, string $publicId, string $confirmationTokenId, int $shownMinor, Application $app, string $paymentMethodId = ''): array
     {
         $payment = $this->ownedPayment($publicId, $user);
         if ($payment['status'] === 'paid') {
@@ -193,12 +193,18 @@ final class CheckoutService
             throw new HttpException(422, 'Tuhle platbu už nejde dokončit.');
         }
         $gateway = StripeGateway::fromConfig();
-        $token = $gateway->retrieveConfirmationToken($confirmationTokenId);
-        $preview = is_array($token['payment_method_preview'] ?? null) ? $token['payment_method_preview'] : [];
+        $paymentMethodId = trim($paymentMethodId);
+        if (str_starts_with($paymentMethodId, 'pm_')) {
+            $preview = $gateway->retrievePaymentMethod($paymentMethodId);
+            $sourceKey = $paymentMethodId;
+        } else {
+            $token = $gateway->retrieveConfirmationToken($confirmationTokenId);
+            $preview = is_array($token['payment_method_preview'] ?? null) ? $token['payment_method_preview'] : [];
+            $sourceKey = $confirmationTokenId;
+        }
         $net = number_format((float) ($payment['amount'] ?? 0), 2, '.', '');
         $inspected = StripeFee::inspectMethod($preview);
-        $priced = StripeFee::forShownMinor($net, $shownMinor)
-            ?? StripeFee::coverFor($net, $inspected['country']);
+        $priced = StripeFee::coverFor($net, $inspected['country']);
         $quote = $this->publicQuote($priced, $inspected);
         if ($shownMinor !== $priced['chargeMinor']) {
             return ['ready' => false] + $quote;
@@ -228,11 +234,28 @@ final class CheckoutService
             }
         }
         try {
-            $intent = $gateway->chargePaymentMethod(
+            $intent = str_starts_with($paymentMethodId, 'pm_')
+                ? $gateway->chargeSavedMethod(
+                    $paymentMethodId,
+                    $priced['chargeMinor'],
+                    'czk',
+                    (string) $payment['public_id'] . ':' . $sourceKey . ':' . $priced['chargeMinor'],
+                    $summary['description'],
+                    $returnUrl,
+                    [
+                        'payment' => (string) $payment['public_id'],
+                        'user' => (string) ($user['public_id'] ?? $user['id']),
+                        'net' => $priced['net'],
+                        'fee' => $priced['fee'],
+                        'card_country' => $inspected['country'],
+                    ],
+                    trim((string) ($user['email'] ?? '')),
+                )
+                : $gateway->chargePaymentMethod(
                 $confirmationTokenId,
                 $priced['chargeMinor'],
                 'czk',
-                (string) $payment['public_id'] . ':' . $confirmationTokenId . ':' . $priced['chargeMinor'],
+                (string) $payment['public_id'] . ':' . $sourceKey . ':' . $priced['chargeMinor'],
                 $summary['description'],
                 $returnUrl,
                 [

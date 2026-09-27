@@ -13,15 +13,11 @@ $ready = str_starts_with($key, 'pk_');
 <header class="pay-head">
     <p class="eyebrow">Platba</p>
     <h1><?= e((string) $summary['title']) ?></h1>
-    <p class="muted">Apple Pay, Google Pay i karta strhnou částku nahoře. U Linku se před platbou mírně zvýší.</p>
+    <p class="muted">Dole je částka, která se skutečně strhne. Poplatek už je v ní.</p>
 </header>
 
 <section class="card pay-checkout">
     <div class="pay-summary">
-    <div class="pay-total">
-        <span>K zaplacení</span>
-        <strong data-charge><?= e($crowns((string) $shown['charge'])) ?></strong>
-    </div>
     <dl class="pay-lines">
         <div>
             <dt>Cena</dt>
@@ -41,11 +37,17 @@ $ready = str_starts_with($key, 'pk_');
             <p class="pay-or" data-pay-or hidden><span>nebo kartou</span></p>
             <div id="payment-element"></div>
             <p class="pay-error" data-error hidden></p>
+        </div>
+        <footer class="pay-payoff">
+            <div class="pay-due">
+                <span>Zaplatíte</span>
+                <strong data-charge><?= e($crowns((string) $shown['charge'])) ?></strong>
+            </div>
             <div class="pay-actions">
                 <button class="button" type="button" data-submit>Zaplatit</button>
                 <a class="btn btn-secondary" href="<?= e(url((string) $page['cancelUrl'])) ?>">Zrušit</a>
             </div>
-        </div>
+        </footer>
     <?php else: ?>
         <div class="pay-methods">
             <p class="pay-error">Platba kartou teď není dostupná.</p>

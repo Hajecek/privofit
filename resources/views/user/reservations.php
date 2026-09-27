@@ -2,7 +2,7 @@
 $hourly = (float) ($availability['hourly_price'] ?? 150);
 $step = (int) ($availability['duration_step_minutes'] ?? 60);
 $min = (int) ($availability['min_minutes'] ?? 60);
-$max = (int) ($availability['max_minutes'] ?? 180);
+$max = (int) ($availability['max_minutes'] ?? 1440);
 $buffer = (int) ($availability['buffer_minutes'] ?? 15);
 $maxPersons = (int) ($availability['max_persons'] ?? 2);
 $dayNames = [1 => 'pondělí', 2 => 'úterý', 3 => 'středa', 4 => 'čtvrtek', 5 => 'pátek', 6 => 'sobota', 7 => 'neděle'];
@@ -22,7 +22,7 @@ $payload = [
     <div>
         <p class="eyebrow">TVŮJ ČAS</p>
         <h1>Rezervace</h1>
-        <p class="muted">Otevři kalendář, vyber den a klikni na blok. Další blok přidáš kliknutím na následující termín. Každý zůstane 1 h 15 min.</p>
+        <p class="muted">Otevři kalendář, vyber den a klikni na první okénko. Další přidáš tlačítkem nebo kliknutím dál v řadě, klidně až do konce dne. Každý blok zůstane 1 h 15 min.</p>
     </div>
     <a class="button" href="<?= e(url('/user/moje-rezervace')) ?>">Moje rezervace</a>
 </div>
@@ -82,7 +82,7 @@ $payload = [
         <div class="booker-hours-head">
             <div>
                 <h2>Hodiny</h2>
-                <p class="muted" data-hours-hint>Každý blok je hodina tréninku plus <?= (int) $buffer ?> min úklid. Dva nebo tři bloky se drží celé.</p>
+                <p class="muted" data-hours-hint>Každý blok je hodina tréninku plus <?= (int) $buffer ?> min úklid. Okének za sebou můžeš vybrat víc, klidně na celý volný den.</p>
             </div>
             <p class="booker-price"><?= e(money_format_czk($hourly)) ?><span> / hod</span></p>
         </div>
@@ -122,10 +122,11 @@ $payload = [
             <span data-bar-meta>Klikni na volnou hodinu v seznamu</span>
         </div>
         <div class="booker-durations" data-durations>
-            <span>Délka</span>
-            <button type="button" data-hours="1">1 h 15</button>
-            <button type="button" data-hours="2">2 h 30</button>
-            <button type="button" data-hours="3">3 h 45</button>
+            <span>Okénka</span>
+            <button type="button" data-hours-minus aria-label="Méně okének">−</button>
+            <strong data-hours-count>1 okénko</strong>
+            <button type="button" data-hours-plus aria-label="Více okének">+</button>
+            <button type="button" data-hours-all>Celý den</button>
         </div>
         <div class="booker-guests" data-guests-wrap>
             <span>Osoby</span>

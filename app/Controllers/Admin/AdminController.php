@@ -929,7 +929,7 @@ final class AdminController extends Controller
         $keys = [
             'reservation.slot_minutes' => 15,
             'reservation.min_minutes' => 60,
-            'reservation.max_minutes' => 180,
+            'reservation.max_minutes' => 1440,
             'reservation.buffer_minutes' => 15,
             'reservation.cancellation_hours' => 12,
             'access.early_minutes' => 5,

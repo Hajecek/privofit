@@ -262,6 +262,16 @@ final class StripeGateway
     }
 
     /** @return array<string, mixed> */
+    public function retrievePaymentMethod(string $paymentMethodId): array
+    {
+        $paymentMethodId = trim($paymentMethodId);
+        if (!str_starts_with($paymentMethodId, 'pm_')) {
+            throw new HttpException(422, 'Neplatná platební metoda.');
+        }
+        return $this->request('GET', '/v1/payment_methods/' . rawurlencode($paymentMethodId), [], $paymentMethodId . ':get');
+    }
+
+    /** @return array<string, mixed> */
     public function retrieveConfirmationToken(string $tokenId): array
     {
         $tokenId = trim($tokenId);
@@ -323,6 +333,52 @@ final class StripeGateway
             'confirm' => 'true',
             'confirmation_method' => 'automatic',
             'confirmation_token' => $confirmationTokenId,
+            'return_url' => $returnUrl,
+            'use_stripe_sdk' => 'true',
+            'description' => $description,
+        ] + $this->metadataFields($metadata);
+        if ($receiptEmail !== '' && str_contains($receiptEmail, '@')) {
+            $fields['receipt_email'] = $receiptEmail;
+        }
+        $intent = $this->request('POST', '/v1/payment_intents', $fields, $idempotencyKey . ':pi');
+        $status = (string) ($intent['status'] ?? '');
+        if (!in_array($status, ['succeeded', 'requires_action', 'processing'], true)) {
+            throw new HttpException(402, 'Platba ve Stripe neprošla.');
+        }
+        return [
+            'id' => (string) ($intent['id'] ?? ''),
+            'status' => $status,
+            'client_secret' => (string) ($intent['client_secret'] ?? ''),
+        ];
+    }
+
+    /**
+     * Stejné stržení jako u confirmation tokenu, jen z Apple Pay metody otevřené až po potvrzení částky.
+     *
+     * @param array<string, string> $metadata
+     * @return array{id:string,status:string,client_secret:string}
+     */
+    public function chargeSavedMethod(
+        string $paymentMethodId,
+        int $chargeMinor,
+        string $currency,
+        string $idempotencyKey,
+        string $description,
+        string $returnUrl,
+        array $metadata,
+        string $receiptEmail = '',
+    ): array {
+        $this->assertAmount($chargeMinor);
+        $paymentMethodId = trim($paymentMethodId);
+        if (!str_starts_with($paymentMethodId, 'pm_')) {
+            throw new HttpException(422, 'Neplatná platební metoda.');
+        }
+        $fields = [
+            'amount' => (string) $chargeMinor,
+            'currency' => strtolower($currency),
+            'confirm' => 'true',
+            'confirmation_method' => 'automatic',
+            'payment_method' => $paymentMethodId,
             'return_url' => $returnUrl,
             'use_stripe_sdk' => 'true',
             'description' => $description,

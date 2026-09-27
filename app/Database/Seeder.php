@@ -160,7 +160,7 @@ final class Seeder
         $defaults = [
             'reservation.slot_minutes' => 15,
             'reservation.min_minutes' => 60,
-            'reservation.max_minutes' => 180,
+            'reservation.max_minutes' => 1440,
             'reservation.buffer_minutes' => 15,
             'reservation.hold_minutes' => 40,
             'reservation.cancellation_hours' => 12,
