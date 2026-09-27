@@ -13,7 +13,7 @@ $ready = str_starts_with($key, 'pk_');
 <header class="pay-head">
     <p class="eyebrow">Platba</p>
     <h1><?= e((string) $summary['title']) ?></h1>
-    <p class="muted">Částka se dopočítá podle země karty, ještě než se peníze strhnou.</p>
+    <p class="muted">Apple Pay, Google Pay i karta strhnou částku nahoře. U Linku se před platbou mírně zvýší.</p>
 </header>
 
 <section class="card pay-checkout">
@@ -32,12 +32,6 @@ $ready = str_starts_with($key, 'pk_');
             <dd data-fee><?= e($crowns((string) $shown['fee'])) ?></dd>
         </div>
     </dl>
-    <ul class="pay-bands">
-        <li>Evropa <?= e($crowns((string) $variants['eea']['fee'])) ?></li>
-        <li>Británie <?= e($crowns((string) $variants['gb']['fee'])) ?></li>
-        <li>Ostatní a Link <?= e($crowns((string) $variants['international']['fee'])) ?></li>
-    </ul>
-    <p class="pay-note" data-note hidden></p>
     </div>
     <?php if ($ready): ?>
         <div class="pay-methods">
@@ -48,7 +42,7 @@ $ready = str_starts_with($key, 'pk_');
             <div id="payment-element"></div>
             <p class="pay-error" data-error hidden></p>
             <div class="pay-actions">
-                <button class="button" type="button" data-submit>Zaplatit <?= e($crowns((string) $shown['charge'])) ?></button>
+                <button class="button" type="button" data-submit>Zaplatit</button>
                 <a class="btn btn-secondary" href="<?= e(url((string) $page['cancelUrl'])) ?>">Zrušit</a>
             </div>
         </div>
@@ -68,5 +62,19 @@ $ready = str_starts_with($key, 'pk_');
     'title' => (string) $summary['title'],
     'confirmUrl' => url('/user/platba/potvrdit'),
     'chargeMinor' => (int) $shown['chargeMinor'],
+    'quotes' => [
+        'card' => [
+            'chargeMinor' => (int) $variants['eea']['chargeMinor'],
+            'fee' => (string) $variants['eea']['fee'],
+            'charge' => (string) $variants['eea']['charge'],
+            'label' => 'evropské karty',
+        ],
+        'link' => [
+            'chargeMinor' => (int) $variants['international']['chargeMinor'],
+            'fee' => (string) $variants['international']['fee'],
+            'charge' => (string) $variants['international']['charge'],
+            'label' => 'Linku',
+        ],
+    ],
 ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
 <?php endif; ?>

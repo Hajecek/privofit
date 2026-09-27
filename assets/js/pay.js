@@ -8,12 +8,13 @@
   const feeEl = root.querySelector("[data-fee]");
   const feeLabelEl = root.querySelector("[data-fee-label]");
   const chargeEl = root.querySelector("[data-charge]");
-  const noteEl = root.querySelector("[data-note]");
   const errorEl = root.querySelector("[data-error]");
   const button = root.querySelector("[data-submit]");
   const walletsEl = root.querySelector("[data-wallets]");
   const orEl = root.querySelector("[data-pay-or]");
+  const quotes = config.quotes || {};
   let shownMinor = Number(config.chargeMinor || 0);
+  let quoteReady = Promise.resolve();
   let busy = false;
   let leaving = false;
 
@@ -65,31 +66,39 @@
     walletsEl?.classList.toggle("is-ready", available);
     if (orEl) orEl.hidden = !available;
   });
+  const paint = (quote) => {
+    shownMinor = Number(quote.chargeMinor || shownMinor);
+    if (feeEl) feeEl.textContent = crowns(quote.fee);
+    if (feeLabelEl) {
+      const label = quote.label || "karty";
+      feeLabelEl.textContent = /karta/i.test(label) ? label : "Poplatek " + label;
+    }
+    if (chargeEl) chargeEl.textContent = crowns(quote.charge);
+  };
+
+  const useQuote = async (quote) => {
+    if (!quote) return;
+    paint(quote);
+    await elements.update({ amount: shownMinor });
+  };
+
   wallets.on("click", (event) => {
     event.resolve({
       lineItems: [{ name: config.title || "PRIVOFIT", amount: shownMinor }],
     });
   });
 
-  elements.create("payment", {
+  const paymentElement = elements.create("payment", {
     layout: "tabs",
     wallets: { applePay: "never", googlePay: "never" },
-  }).mount("#payment-element");
-
-  const applyQuote = (quote) => {
-    shownMinor = Number(quote.chargeMinor || shownMinor);
-    elements.update({ amount: shownMinor });
-    if (feeEl) feeEl.textContent = crowns(quote.fee);
-    if (feeLabelEl) feeLabelEl.textContent = "Poplatek · " + (quote.label || "karta");
-    if (chargeEl) chargeEl.textContent = crowns(quote.charge);
-    if (button) button.textContent = "Zaplatit " + crowns(quote.charge);
-    if (noteEl) {
-      noteEl.hidden = false;
-      noteEl.textContent = quote.assumed
-        ? "Link neposlal zemi karty. Poplatek je proto jako u zahraniční karty, ať na účtu zůstane celá cena. Zkontroluj částku a zaplať znovu."
-        : "Tahle karta má jiný poplatek. Zkontroluj částku a zaplať znovu.";
-    }
-  };
+  });
+  paymentElement.mount("#payment-element");
+  paymentElement.on("change", (event) => {
+    if (busy) return;
+    const quote = event?.value?.type === "link" ? quotes.link : quotes.card;
+    if (!quote || Number(quote.chargeMinor) === shownMinor) return;
+    quoteReady = useQuote(quote);
+  });
 
   const post = async (body) => {
     const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
@@ -109,24 +118,35 @@
     return payload.data || {};
   };
 
-  const completePayment = async () => {
+  const authorize = async () => {
     const submitted = await elements.submit();
     if (submitted.error) {
       showError(submitted.error.message || "Zkontroluj údaje karty.");
-      return false;
+      return null;
     }
     const created = await stripe.createConfirmationToken({ elements });
     if (created.error || !created.confirmationToken) {
       showError(created.error?.message || "Kartu se nepodařilo načíst.");
-      return false;
+      return null;
     }
-    const data = await post({
+    return post({
       platba: config.platba,
       confirmation_token: created.confirmationToken.id,
       shown_minor: shownMinor,
     });
+  };
+
+  const completePayment = async (options = {}) => {
+    await quoteReady;
+    let data = await authorize();
+    if (!data) return false;
+    if (!data.ready && !options.keepAmount) {
+      await useQuote(data);
+      data = await authorize();
+      if (!data) return false;
+    }
     if (!data.ready) {
-      applyQuote(data);
+      showError("Částku se nepodařilo sladit s kartou. Zkus to znovu.");
       return false;
     }
     if (data.status === "requires_action" && data.clientSecret) {
@@ -160,7 +180,7 @@
     if (button) button.disabled = true;
     showError("");
     try {
-      const paid = await completePayment();
+      const paid = await completePayment({ keepAmount: true });
       if (!paid) failWallet(event);
     } catch (error) {
       showError(error instanceof Error ? error.message : "Platbu se nepodařilo dokončit.");

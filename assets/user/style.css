@@ -5345,35 +5345,11 @@ body.user-app:has(.profile-save.is-on) .app-main { padding-bottom: 140px; }
   font-weight: 700;
   white-space: nowrap;
 }
-.pay-bands {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 16px 0 0;
-  padding: 0;
-  list-style: none;
-}
-.pay-bands li {
-  padding: 7px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: rgba(0, 0, 0, .18);
-  color: var(--secondary);
-  font-size: .78rem;
-  font-weight: 650;
-}
 .pay-methods {
   min-width: 0;
   margin: 0;
   padding: 4px 0 4px 36px;
   border-left: 1px solid var(--line);
-}
-.pay-note {
-  margin: 16px 0 0;
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: rgba(198, 242, 26, .08);
-  border: 1px solid rgba(198, 242, 26, .28);
 }
 .pay-error {
   margin: 12px 0 0;

@@ -10,6 +10,7 @@ use App\Core\Env;
 use App\Services\Auth\AuthService;
 use App\Services\Cron\Jobs\ReservationReminderJob;
 use App\Services\Cron\NotificationDispatcher;
+use App\Services\ReservationAdminNotice;
 use App\Support\Clock;
 use PHPUnit\Framework\TestCase;
 
@@ -195,6 +196,102 @@ final class CronNotificationTest extends TestCase
                 return (string) ($decoded['subject'] ?? '');
             }, $subjects);
             $this->assertSame(['💳 Tarif zaplacen', '⚠️ Platba odmítnuta', '🚫 Platba zrušena'], $titles);
+        } finally {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+        }
+    }
+
+    public function testAdminHearsAboutBookedReservationImmediately(): void
+    {
+        $room = $this->db->fetch('SELECT id, name FROM rooms WHERE is_active = 1 ORDER BY id ASC LIMIT 1');
+        if (!$room) {
+            $this->markTestSkipped('V databázi není aktivní studio.');
+        }
+        try {
+            $this->db->fetch('SELECT id FROM cron_events LIMIT 1');
+        } catch (\Throwable) {
+            $this->markTestSkipped('Chybí tabulka cron_events. Spusťte migrace.');
+        }
+
+        $customer = $this->createVerifiedUser('rez');
+        $admin = $this->createVerifiedUser('rezadm');
+        $customerId = (int) $customer['id'];
+        $adminId = (int) $admin['id'];
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $this->db->update('users', ['role' => 'admin', 'first_name' => 'Admin', 'last_name' => 'Studia'], 'id = :id', ['id' => $adminId]);
+            $this->db->update('users', ['first_name' => 'Jana', 'last_name' => 'Nováková'], 'id = :id', ['id' => $customerId]);
+            $coveredId = (int) $this->db->insert('reservations', [
+                'public_id' => Crypto::uuid(),
+                'room_id' => (int) $room['id'],
+                'user_id' => $customerId,
+                'status' => 'confirmed',
+                'starts_at' => '2099-07-01 16:00:00',
+                'ends_at' => '2099-07-01 17:00:00',
+                'buffer_minutes' => 15,
+                'guest_count' => 2,
+                'price' => '0.00',
+                'currency' => 'CZK',
+                'created_at' => Clock::utc(),
+                'updated_at' => Clock::utc(),
+            ]);
+            $notice = new ReservationAdminNotice($this->db);
+            $notice->send($coveredId);
+            $notice->send($coveredId);
+            $this->assertSame(1, $this->countChannel($adminId, 'admin-reservation', 'email'));
+            $this->assertSame(1, $this->countChannel($adminId, 'admin-reservation', 'in_app'));
+            $this->assertSame(0, $this->countNotes($customerId, 'admin-reservation'));
+
+            $payload = json_decode((string) $this->db->fetchColumn(
+                "SELECT payload_json FROM notifications WHERE user_id = :uid AND template = 'admin-reservation' AND channel = 'email' ORDER BY id DESC LIMIT 1",
+                ['uid' => $adminId]
+            ), true);
+            $this->assertIsArray($payload);
+            $this->assertSame('🗓️ Nová rezervace', $payload['subject']);
+            $this->assertStringContainsString('Jana Nováková', (string) $payload['body']);
+            $this->assertStringContainsString('1. 7. 2099 18:00–19:00', (string) $payload['body']);
+            $this->assertStringContainsString((string) $room['name'], (string) $payload['body']);
+            $this->assertStringContainsString('2 osoby', (string) $payload['body']);
+            $this->assertStringContainsString('vstup z tarifu', (string) $payload['body']);
+
+            $paidId = (int) $this->db->insert('reservations', [
+                'public_id' => Crypto::uuid(),
+                'room_id' => (int) $room['id'],
+                'user_id' => $customerId,
+                'status' => 'confirmed',
+                'starts_at' => '2099-07-02 08:00:00',
+                'ends_at' => '2099-07-02 09:00:00',
+                'buffer_minutes' => 15,
+                'guest_count' => 1,
+                'price' => '350.00',
+                'currency' => 'CZK',
+                'created_at' => Clock::utc(),
+                'updated_at' => Clock::utc(),
+            ]);
+            $this->db->insert('payments', [
+                'public_id' => Crypto::uuid(),
+                'user_id' => $customerId,
+                'reservation_id' => $paidId,
+                'provider' => 'stripe',
+                'amount' => '350.00',
+                'fee_amount' => '12.40',
+                'charged_amount' => '362.40',
+                'currency' => 'CZK',
+                'status' => 'paid',
+                'created_at' => Clock::utc(),
+                'updated_at' => Clock::utc(),
+            ]);
+            $notice->send($paidId);
+            $paidPayload = json_decode((string) $this->db->fetchColumn(
+                "SELECT payload_json FROM notifications WHERE user_id = :uid AND template = 'admin-reservation' AND channel = 'email' ORDER BY id DESC LIMIT 1",
+                ['uid' => $adminId]
+            ), true);
+            $this->assertIsArray($paidPayload);
+            $this->assertSame('🗓️ Rezervace zaplacena', $paidPayload['subject']);
+            $this->assertStringContainsString('362,40 Kč', (string) $paidPayload['body']);
         } finally {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();

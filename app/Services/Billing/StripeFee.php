@@ -140,6 +140,21 @@ final class StripeFee
     }
 
     /**
+     * Částka, kterou zákazník už vidí. Když sedí na zveřejněnou sazbu, platí se ta a ne nižší dopočet podle karty.
+     *
+     * @return Quote|null
+     */
+    public static function forShownMinor(string|float|int $netAmount, int $shownMinor): ?array
+    {
+        foreach (self::variants($netAmount) as $quote) {
+            if ($quote['chargeMinor'] === $shownMinor) {
+                return $quote;
+            }
+        }
+        return null;
+    }
+
+    /**
      * @return Quote
      */
     public static function cover(string|float|int $netAmount): array

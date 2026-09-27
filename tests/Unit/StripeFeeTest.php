@@ -70,6 +70,14 @@ final class StripeFeeTest extends TestCase
         $this->assertFalse($inspected['assumed']);
     }
 
+    public function testShownAmountStaysWhenCardWouldBeCheaper(): void
+    {
+        $link = StripeFee::coverFor('1100.00', 'US');
+        $kept = StripeFee::forShownMinor('1100.00', $link['chargeMinor']);
+        $this->assertSame('1142.49', $kept['charge']);
+        $this->assertNull(StripeFee::forShownMinor('1100.00', 1));
+    }
+
     public function testEmptyCountryStaysEuropean(): void
     {
         $priced = StripeFee::coverForMethod('1100.00', [

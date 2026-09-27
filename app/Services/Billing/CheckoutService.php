@@ -8,8 +8,6 @@ use App\Core\Application;
 use App\Core\Database;
 use App\Core\HttpException;
 use App\Services\Auth\AuthService;
-use App\Services\Cron\CronText;
-use App\Services\Cron\NotificationDispatcher;
 use App\Services\MembershipService;
 use App\Services\ReservationService;
 use App\Support\Clock;
@@ -199,7 +197,8 @@ final class CheckoutService
         $preview = is_array($token['payment_method_preview'] ?? null) ? $token['payment_method_preview'] : [];
         $net = number_format((float) ($payment['amount'] ?? 0), 2, '.', '');
         $inspected = StripeFee::inspectMethod($preview);
-        $priced = StripeFee::coverFor($net, $inspected['country']);
+        $priced = StripeFee::forShownMinor($net, $shownMinor)
+            ?? StripeFee::coverFor($net, $inspected['country']);
         $quote = $this->publicQuote($priced, $inspected);
         if ($shownMinor !== $priced['chargeMinor']) {
             return ['ready' => false] + $quote;
@@ -346,48 +345,7 @@ final class CheckoutService
         }
         $user = AuthService::make($this->db)->findById((int) $reservation['user_id']);
         $this->reservations->confirmPending($reservation, $user ?: []);
-        $this->notifyReservationPaid($payment, $reservation, $user ?: []);
         return $this->payments->findByPublicId((string) $payment['public_id']) ?? $payment;
-    }
-
-    /**
-     * @param array<string, mixed> $payment
-     * @param array<string, mixed> $reservation
-     * @param array<string, mixed> $user
-     */
-    private function notifyReservationPaid(array $payment, array $reservation, array $user): void
-    {
-        $person = CronText::person($user);
-        $when = '';
-        try {
-            $when = Clock::format((string) $reservation['starts_at'], 'j. n. Y H:i');
-        } catch (\Throwable) {
-            $when = '';
-        }
-        $charged = (float) ($payment['charged_amount'] ?? 0);
-        $amount = $charged > 0 ? $charged : (float) ($payment['amount'] ?? 0);
-        $money = number_format($amount, 2, ',', ' ') . ' Kč';
-        $parts = array_values(array_filter([$person, $when, $money], static fn (string $part): bool => $part !== ''));
-        try {
-            NotificationDispatcher::make($this->db)->notifyNow(
-                'admin:reservation.paid:' . (int) $payment['id'],
-                'admin',
-                'reservation.paid',
-                null,
-                [
-                    'template' => 'admin-reservation',
-                    'push_type' => 'admin.sync',
-                    'subject' => '🗓️ Rezervace zaplacena',
-                    'body' => implode(' · ', $parts),
-                    'action_url' => CronText::link('/user/sprava/rezervace'),
-                ]
-            );
-        } catch (\Throwable $e) {
-            \App\Core\Logger::error('Zpráva administrátorům o rezervaci se neodeslala', [
-                'payment' => $payment['id'] ?? null,
-                'error' => $e->getMessage(),
-            ]);
-        }
     }
 
     /** @param array<string, mixed> $payment @return array<string, mixed> */

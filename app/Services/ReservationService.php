@@ -356,6 +356,9 @@ final class ReservationService
                 return $reservation;
             });
             $this->touchLive();
+            if (is_array($reservation) && ($reservation['status'] ?? '') === 'confirmed') {
+                (new ReservationAdminNotice($this->db))->send((int) $reservation['id']);
+            }
             return $reservation;
         } catch (\PDOException $e) {
             if ($this->isDuplicateKey($e)) {
@@ -1235,6 +1238,9 @@ final class ReservationService
             }
         } catch (\Throwable) {
             // rezervace platí i bez e-mailu
+        }
+        if ($wasPending && ($fresh['status'] ?? '') === 'confirmed') {
+            (new ReservationAdminNotice($this->db))->send((int) $fresh['id']);
         }
         $this->touchLive();
         return $fresh;
