@@ -261,6 +261,87 @@ final class StripeGateway
         return $token;
     }
 
+    /** @return array<string, mixed> */
+    public function retrieveConfirmationToken(string $tokenId): array
+    {
+        $tokenId = trim($tokenId);
+        if (!str_starts_with($tokenId, 'ctoken_')) {
+            throw new HttpException(422, 'Neplatná platební metoda.');
+        }
+        return $this->request('GET', '/v1/confirmation_tokens/' . rawurlencode($tokenId), [], $tokenId . ':get');
+    }
+
+    public function cancelPaymentIntent(string $intentId): void
+    {
+        $intentId = trim($intentId);
+        if (!str_starts_with($intentId, 'pi_')) {
+            return;
+        }
+        try {
+            $this->request('POST', '/v1/payment_intents/' . rawurlencode($intentId) . '/cancel', [], $intentId . ':cancel');
+        } catch (HttpException $e) {
+            if ($e->status >= 500) {
+                throw $e;
+            }
+        }
+    }
+
+    /** @return array<string, mixed> */
+    public function retrievePaymentIntent(string $intentId): array
+    {
+        $intentId = trim($intentId);
+        if (!str_starts_with($intentId, 'pi_')) {
+            throw new HttpException(422, 'Neplatná platba.');
+        }
+        return $this->request('GET', '/v1/payment_intents/' . rawurlencode($intentId), [], $intentId . ':get');
+    }
+
+    /**
+     * Strhne částku, která už obsahuje poplatek podle země karty.
+     *
+     * @param array<string, string> $metadata
+     * @return array{id:string,status:string,client_secret:string}
+     */
+    public function chargePaymentMethod(
+        string $confirmationTokenId,
+        int $chargeMinor,
+        string $currency,
+        string $idempotencyKey,
+        string $description,
+        string $returnUrl,
+        array $metadata,
+        string $receiptEmail = '',
+    ): array {
+        $this->assertAmount($chargeMinor);
+        $confirmationTokenId = trim($confirmationTokenId);
+        if (!str_starts_with($confirmationTokenId, 'ctoken_')) {
+            throw new HttpException(422, 'Neplatná platební metoda.');
+        }
+        $fields = [
+            'amount' => (string) $chargeMinor,
+            'currency' => strtolower($currency),
+            'confirm' => 'true',
+            'confirmation_method' => 'automatic',
+            'confirmation_token' => $confirmationTokenId,
+            'return_url' => $returnUrl,
+            'use_stripe_sdk' => 'true',
+            'description' => $description,
+        ] + $this->metadataFields($metadata);
+        if ($receiptEmail !== '' && str_contains($receiptEmail, '@')) {
+            $fields['receipt_email'] = $receiptEmail;
+        }
+        $intent = $this->request('POST', '/v1/payment_intents', $fields, $idempotencyKey . ':pi');
+        $status = (string) ($intent['status'] ?? '');
+        if (!in_array($status, ['succeeded', 'requires_action', 'processing'], true)) {
+            throw new HttpException(402, 'Platba ve Stripe neprošla.');
+        }
+        return [
+            'id' => (string) ($intent['id'] ?? ''),
+            'status' => $status,
+            'client_secret' => (string) ($intent['client_secret'] ?? ''),
+        ];
+    }
+
     /**
      * Metoda, stav, poplatek a výplata tak, jak je vrací Stripe.
      *

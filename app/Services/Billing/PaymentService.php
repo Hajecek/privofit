@@ -110,6 +110,19 @@ final class PaymentService
         return $this->db->fetch('SELECT * FROM payments WHERE id = :id', ['id' => $id]) ?? [];
     }
 
+    /** @param array{fee:string,charge:string} $priced */
+    public function applyStripeQuote(int $paymentId, array $priced): void
+    {
+        $this->db->update('payments', [
+            'fee_amount' => $priced['fee'],
+            'charged_amount' => $priced['charge'],
+            'updated_at' => Clock::utc(),
+        ], 'id = :id AND status = :pending', [
+            'id' => $paymentId,
+            'pending' => 'pending',
+        ]);
+    }
+
     public function attachProviderReference(int $paymentId, string $reference): void
     {
         $this->db->update('payments', [

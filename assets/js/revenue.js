@@ -11,7 +11,8 @@
       const dayUrl = chartRoot.getAttribute("data-day-url") || "";
 
       if (line) {
-        Charts.drawLineChart(line, payload.days || [], {
+        Charts.mountSeriesChart(chartRoot, line, payload.days || [], {
+          segments: payload.segments || [],
           tipEl: tip,
           onSelect: (day) => {
             if (!day?.date || !dayUrl) return;
@@ -20,8 +21,10 @@
         });
       }
       if (donut) {
-        Charts.drawDonut(donut, payload.breakdown || {});
-        window.addEventListener("resize", () => Charts.drawDonut(donut, payload.breakdown || {}));
+        const segments = payload.segments || [];
+        const paintDonut = () => Charts.drawDonut(donut, payload.breakdown || {}, segments);
+        paintDonut();
+        window.addEventListener("resize", paintDonut);
       }
     }
   }

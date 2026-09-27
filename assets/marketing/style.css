@@ -24,7 +24,9 @@
 html {
   scroll-behavior: smooth;
   scroll-padding-top: 110px;
+  scrollbar-width: none;
 }
+html::-webkit-scrollbar { width: 0; }
 body {
   margin: 0;
   background: var(--night);

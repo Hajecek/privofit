@@ -45,16 +45,6 @@ final class AdminController extends Controller
             ['a' => $todayStart, 'b' => $todayEnd]
         );
 
-        $recentDenied = $db->fetchAll(
-            "SELECT l.created_at, l.denial_reason, l.authorization_result, u.username, u.first_name, u.last_name, u.public_id
-             FROM access_logs l
-             LEFT JOIN users u ON u.id = l.user_id
-             WHERE l.authorization_result = 'denied' AND l.created_at >= :a
-             ORDER BY l.created_at DESC
-             LIMIT 8",
-            ['a' => $todayStart]
-        );
-
         $next = $db->fetch(
             "SELECT r.starts_at, r.ends_at, u.first_name, u.last_name, rm.name AS room_name
              FROM reservations r
@@ -72,7 +62,7 @@ final class AdminController extends Controller
             'current' => ReservationService::make($db)->occupancyNow(),
             'next' => $next,
             'today_list' => $todayReservations,
-            'denied_list' => $recentDenied,
+            'notices' => $this->dashboardNotices($db),
             'revenue' => (string) $db->fetchColumn(
                 'SELECT COALESCE(SUM(amount),0) FROM payments WHERE ' . PaymentService::revenueSql() . ' AND paid_at >= :a AND paid_at < :b',
                 [
@@ -119,6 +109,223 @@ final class AdminController extends Controller
             'chart' => $chart,
             'pageScripts' => ['js/rev-charts.js', 'js/admin-dash.js', 'js/customers.js'],
         ]);
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function dashboardNotices(Database $db): array
+    {
+        $nowLocal = Clock::nowLocal();
+        $todayKey = $nowLocal->format('Y-m-d');
+        $weekStart = Clock::toUtc($nowLocal->modify('-6 days')->setTime(0, 0))->format('Y-m-d H:i:s');
+        $now = Clock::utc();
+        $stamp = static function (string $utc) use ($todayKey): array {
+            $local = Clock::toLocal($utc);
+            return [
+                'at' => $local->getTimestamp(),
+                'when' => $local->format('Y-m-d') === $todayKey ? $local->format('H:i') : $local->format('j. n. H:i'),
+            ];
+        };
+        $person = static function (array $row): array {
+            $name = trim((string) (($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? '')));
+            if ($name === '') {
+                $name = (string) ($row['username'] ?? $row['email'] ?? 'Neznámý');
+            }
+            $first = (string) ($row['first_name'] ?? '');
+            $last = (string) ($row['last_name'] ?? '');
+            $initials = mb_strtoupper(mb_substr($first, 0, 1) . mb_substr($last, 0, 1));
+            if ($initials === '') {
+                $initials = mb_strtoupper(mb_substr($name, 0, 1)) ?: 'P';
+            }
+            $publicId = (string) ($row['public_id'] ?? '');
+            $avatar = null;
+            if ($publicId !== '' || !empty($row['avatar_path'])) {
+                $avatar = avatar_url([
+                    'avatar_path' => $row['avatar_path'] ?? null,
+                    'public_id' => $publicId !== '' ? $publicId : 'guest',
+                    'first_name' => $first,
+                    'last_name' => $last,
+                ]);
+            }
+
+            return [
+                'title' => $name,
+                'initials' => mb_substr($initials, 0, 2),
+                'avatar' => $avatar,
+                'href' => $publicId !== '' ? url('/user/sprava/zakaznici/' . $publicId) : null,
+            ];
+        };
+        $reasons = [
+            'admin_open' => 'Správce otevřel dveře',
+            'admin_close' => 'Správce zavřel dveře',
+            'unverified' => 'Účet nemá ověřený e-mail',
+            'inactive' => 'Účet není aktivní',
+            'no_reservation' => 'Vstup bez platné rezervace',
+            'no_door' => 'Chybí nastavené dveře',
+            'no_permission' => 'Nemá oprávnění ke vstupu',
+            'rate_limited' => 'Příliš mnoho pokusů o vstup',
+            'door_busy' => 'Zámek byl zaneprázdněný',
+            'not_configured' => 'Vstup není nastavený',
+        ];
+        $notices = [];
+
+        $denied = $db->fetchAll(
+            "SELECT l.created_at, l.denial_reason, u.username, u.first_name, u.last_name, u.public_id, u.avatar_path
+             FROM access_logs l
+             LEFT JOIN users u ON u.id = l.user_id
+             WHERE l.authorization_result = 'denied' AND l.created_at >= :a
+             ORDER BY l.created_at DESC
+             LIMIT 6",
+            ['a' => $weekStart]
+        );
+        foreach ($denied as $row) {
+            $who = $person($row);
+            $reasonKey = (string) ($row['denial_reason'] ?? '');
+            $notices[] = array_merge($who, $stamp((string) $row['created_at']), [
+                'key' => 'entry:' . ((string) ($row['public_id'] ?? 'anon')) . ':' . (string) $row['created_at'],
+                'text' => $reasons[$reasonKey] ?? ($reasonKey !== '' ? $reasonKey : 'Vstup byl zamítnut'),
+                'kind' => 'Vstup',
+                'kind_class' => 'is-entry',
+                'tone' => 'bad',
+                'href' => $who['href'] ?? url('/user/sprava/vstup'),
+            ]);
+        }
+
+        $pending = $db->fetchAll(
+            "SELECT r.public_id AS reservation_id, r.created_at, r.starts_at, r.price, rm.name AS room_name,
+                    u.first_name, u.last_name, u.username, u.public_id, u.avatar_path
+             FROM reservations r
+             INNER JOIN users u ON u.id = r.user_id
+             LEFT JOIN rooms rm ON rm.id = r.room_id
+             WHERE r.status = 'pending_payment' AND r.ends_at >= :now
+             ORDER BY r.created_at DESC
+             LIMIT 6",
+            ['now' => $now]
+        );
+        foreach ($pending as $row) {
+            $who = $person($row);
+            $start = Clock::toLocal((string) $row['starts_at']);
+            $room = trim((string) ($row['room_name'] ?? ''));
+            $notices[] = array_merge($who, $stamp((string) $row['created_at']), [
+                'key' => 'res:' . (string) ($row['reservation_id'] ?? $row['created_at']) . ':pending',
+                'text' => 'Čeká na platbu ' . money_format_czk($row['price'] ?? 0) . ' · ' . $start->format('j. n. H:i') . ($room !== '' ? ' · ' . $room : ''),
+                'kind' => 'Rezervace',
+                'kind_class' => 'is-book',
+                'tone' => 'warn',
+                'href' => $this->noticePlaceUrl('/user/sprava/rezervace', ['stav' => 'vse', 'q' => (string) ($row['username'] ?: ($row['last_name'] ?? ''))], $who['href'] ?? null),
+            ]);
+        }
+
+        $booked = $db->fetchAll(
+            "SELECT r.public_id AS reservation_id, r.created_at, r.starts_at, rm.name AS room_name,
+                    u.first_name, u.last_name, u.username, u.public_id, u.avatar_path
+             FROM reservations r
+             INNER JOIN users u ON u.id = r.user_id
+             LEFT JOIN rooms rm ON rm.id = r.room_id
+             WHERE r.status = 'confirmed' AND r.created_at >= :a
+             ORDER BY r.created_at DESC
+             LIMIT 6",
+            ['a' => $weekStart]
+        );
+        foreach ($booked as $row) {
+            $who = $person($row);
+            $start = Clock::toLocal((string) $row['starts_at']);
+            $room = trim((string) ($row['room_name'] ?? ''));
+            $notices[] = array_merge($who, $stamp((string) $row['created_at']), [
+                'key' => 'res:' . (string) ($row['reservation_id'] ?? $row['created_at']) . ':confirmed',
+                'text' => 'Nová rezervace · ' . $start->format('j. n. H:i') . ($room !== '' ? ' · ' . $room : ''),
+                'kind' => 'Rezervace',
+                'kind_class' => 'is-book',
+                'tone' => '',
+                'href' => $this->noticePlaceUrl('/user/sprava/rezervace', ['stav' => 'vse', 'q' => (string) ($row['username'] ?: ($row['last_name'] ?? ''))], $who['href'] ?? null),
+            ]);
+        }
+
+        $payments = $db->fetchAll(
+            "SELECT p.public_id AS payment_id, p.created_at, p.paid_at, p.amount, p.status,
+                    u.first_name, u.last_name, u.username, u.public_id, u.avatar_path
+             FROM payments p
+             LEFT JOIN users u ON u.id = p.user_id
+             WHERE p.status IN ('paid', 'failed', 'refunded') AND p.created_at >= :a
+             ORDER BY p.created_at DESC
+             LIMIT 8",
+            ['a' => $weekStart]
+        );
+        foreach ($payments as $row) {
+            $who = $person($row);
+            $amount = money_format_czk($row['amount'] ?? 0);
+            $status = (string) ($row['status'] ?? '');
+            $text = match ($status) {
+                'failed' => 'Platba ' . $amount . ' se nezdařila',
+                'refunded' => 'Platba ' . $amount . ' byla vrácena',
+                default => 'Přišla platba ' . $amount,
+            };
+            $at = (string) (($row['paid_at'] ?? '') !== '' && $row['paid_at'] !== null ? $row['paid_at'] : $row['created_at']);
+            $notices[] = array_merge($who, $stamp($at), [
+                'key' => 'pay:' . (string) ($row['payment_id'] ?? $at),
+                'text' => $text,
+                'kind' => 'Platba',
+                'kind_class' => 'is-pay',
+                'tone' => $status === 'paid' ? '' : 'bad',
+                'href' => $who['href'] ?? url('/user/sprava/trzby'),
+            ]);
+        }
+
+        $customers = $db->fetchAll(
+            "SELECT created_at, first_name, last_name, username, email, public_id, avatar_path
+             FROM users
+             WHERE deleted_at IS NULL AND role = 'user' AND created_at >= :a
+             ORDER BY created_at DESC
+             LIMIT 5",
+            ['a' => $weekStart]
+        );
+        foreach ($customers as $row) {
+            $who = $person($row);
+            $notices[] = array_merge($who, $stamp((string) $row['created_at']), [
+                'key' => 'user:' . (string) ($row['public_id'] ?? $row['created_at']),
+                'text' => 'Založil zákaznický účet',
+                'kind' => 'Zákazník',
+                'kind_class' => 'is-user',
+                'tone' => '',
+            ]);
+        }
+
+        try {
+            $leads = $db->fetchAll(
+                'SELECT email, created_at FROM interest_signups WHERE created_at >= :a ORDER BY created_at DESC LIMIT 5',
+                ['a' => $weekStart]
+            );
+            foreach ($leads as $row) {
+                $email = (string) ($row['email'] ?? '');
+                $local = strstr($email, '@', true) ?: $email;
+                $notices[] = array_merge($stamp((string) $row['created_at']), [
+                    'key' => 'lead:' . strtolower($email),
+                    'title' => $email !== '' ? $email : 'Neznámý e-mail',
+                    'initials' => mb_strtoupper(mb_substr($local, 0, 2)) ?: 'Z',
+                    'avatar' => null,
+                    'href' => $email !== '' ? url('/user/sprava/zajem?q=' . rawurlencode($email)) : url('/user/sprava/zajem'),
+                    'text' => 'Zapsal se mezi zájemce',
+                    'kind' => 'Zájem',
+                    'kind_class' => 'is-lead',
+                    'tone' => '',
+                ]);
+            }
+        } catch (\PDOException) {
+        }
+
+        usort($notices, static fn (array $a, array $b): int => ($b['at'] ?? 0) <=> ($a['at'] ?? 0));
+
+        return array_slice($notices, 0, 14);
+    }
+
+    /** @param array<string, string> $query */
+    private function noticePlaceUrl(string $path, array $query, ?string $fallback): string
+    {
+        $query = array_filter($query, static fn (string $value): bool => $value !== '');
+        if ($query === []) {
+            return $fallback ?: url($path);
+        }
+
+        return url($path . '?' . http_build_query($query));
     }
 
     public function users(Request $request): never
@@ -657,22 +864,49 @@ final class AdminController extends Controller
     public function access(): never
     {
         $this->view('admin/access', [
-            'title' => 'Vstupní systém',
+            'title' => 'Dveře',
             'status' => AccessControlService::make($this->app->db())->doorStatus(),
-            'doors' => $this->app->db()->fetchAll('SELECT * FROM doors'),
-            'logs' => $this->app->db()->fetchAll('SELECT l.*, u.username FROM access_logs l LEFT JOIN users u ON u.id = l.user_id ORDER BY l.created_at DESC LIMIT 80'),
+            'doors' => $this->app->db()->fetchAll('SELECT * FROM doors ORDER BY id ASC'),
+            'logs' => $this->app->db()->fetchAll('SELECT l.*, u.username, u.first_name, u.last_name FROM access_logs l LEFT JOIN users u ON u.id = l.user_id ORDER BY l.created_at DESC LIMIT 80'),
+            'pageScripts' => ['js/doors.js'],
         ]);
     }
 
-    public function testOpen(Request $request): never
+    public function doorLive(): never
+    {
+        $this->jsonOk(AccessControlService::make($this->app->db())->liveDoors());
+    }
+
+    public function setDoor(Request $request): never
     {
         $actor = $this->requireUser();
-        $password = (string) $request->input('password', '');
-        if (!AuthService::make($this->app->db()) || !\App\Core\Crypto::verifyPassword($password, (string) $actor['password_hash'])) {
-            $this->flashError('Opětovné ověření selhalo.');
-            $this->redirect('/user/sprava/vstup');
+        $doorId = (int) $request->input('door_id', 0);
+        $open = (string) $request->input('state', '') === 'open';
+        $json = $request->wantsJson();
+        try {
+            $access = AccessControlService::make($this->app->db());
+            $result = $access->adminSet($actor, $doorId, $open, $request->ip());
+            (new AuditService($this->app->db()))->log(
+                (int) $actor['id'],
+                $open ? 'door.open' : 'door.close',
+                'door',
+                $doorId,
+                null,
+                ['state' => $open ? 'open' : 'close'],
+                $request->ip()
+            );
+            $message = (string) ($result['message'] ?? ($open ? 'Dveře jsou otevřené.' : 'Dveře jsou zavřené.'));
+            if ($json) {
+                $this->jsonOk(['door' => $access->liveDoor($doorId)], $message);
+            }
+            $this->flashSuccess($message);
+        } catch (HttpException $e) {
+            $message = $e->getMessage() !== '' ? $e->getMessage() : 'Příkaz se nepodařilo odeslat.';
+            if ($json) {
+                $this->jsonError($message, $e->status >= 400 ? $e->status : 400);
+            }
+            $this->flashError($message);
         }
-        $this->flashSuccess('Testovací režim je aktivní. Ostré otevření se spustí až po konfiguraci Nuki.');
         $this->redirect('/user/sprava/vstup');
     }
 
@@ -813,12 +1047,12 @@ final class AdminController extends Controller
                 'other' => $otherTotal,
             ],
             'chart' => $analytics,
-            'pageScripts' => ['js/rev-charts.js', 'js/revenue.js'],
+            'pageScripts' => ['js/rev-charts.js', 'js/revenue.js', 'js/payment-detail.js'],
         ]);
     }
 
     /**
-     * @return array{days:list<array{date:string,label:string,amount:float,count:int}>,breakdown:array{reservations:float,memberships:float,other:float},total:float,count:int}
+     * @return array{days:list<array{date:string,label:string,amount:float,count:int,reservations:float,memberships:float,other:float,parts:object}>,breakdown:array{reservations:float,memberships:float,other:float},segments:list<array{key:string,label:string,color:string,amount:float}>,total:float,count:int}
      */
     private function revenueAnalytics(\DateTimeImmutable $fromLocal, \DateTimeImmutable $toExclusiveLocal): array
     {
@@ -830,13 +1064,20 @@ final class AdminController extends Controller
                 'label' => $cursor->format('j.n.'),
                 'amount' => 0.0,
                 'count' => 0,
+                'reservations' => 0.0,
+                'memberships' => 0.0,
+                'other' => 0.0,
+                'parts' => new \stdClass(),
             ];
         }
 
         $rows = $this->app->db()->fetchAll(
-            'SELECT amount, paid_at, reservation_id, membership_id, provider
-             FROM payments
-             WHERE ' . PaymentService::revenueSql() . ' AND paid_at >= :a AND paid_at < :b',
+            'SELECT p.amount, p.paid_at, p.reservation_id, p.membership_id,
+                    mp.slug AS plan_slug, mp.name AS plan_name, mp.type AS plan_type, mp.sort_order AS plan_sort
+             FROM payments p
+             LEFT JOIN memberships m ON m.id = p.membership_id
+             LEFT JOIN membership_plans mp ON mp.id = m.plan_id
+             WHERE ' . PaymentService::revenueSql('p') . ' AND p.paid_at >= :a AND p.paid_at < :b',
             [
                 'a' => Clock::toUtc($fromLocal)->format('Y-m-d H:i:s'),
                 'b' => Clock::toUtc($toExclusiveLocal)->format('Y-m-d H:i:s'),
@@ -844,30 +1085,100 @@ final class AdminController extends Controller
         );
 
         $breakdown = ['reservations' => 0.0, 'memberships' => 0.0, 'other' => 0.0];
+        $catalog = [];
         $total = 0.0;
         foreach ($rows as $row) {
             $amount = (float) ($row['amount'] ?? 0);
             $total += $amount;
             $dayKey = Clock::toLocal((string) $row['paid_at'])->format('Y-m-d');
+            if (!empty($row['reservation_id'])) {
+                $bucket = 'reservations';
+                $segmentKey = 'entry';
+                $segment = ['key' => $segmentKey, 'label' => 'Vstupné', 'kind' => 'entry', 'sort' => 0];
+            } elseif (!empty($row['membership_id'])) {
+                $bucket = 'memberships';
+                $slug = strtolower(trim((string) ($row['plan_slug'] ?? '')));
+                $safe = preg_replace('/[^a-z0-9_-]/', '', $slug) ?? '';
+                $segmentKey = $safe !== '' ? 'plan:' . $safe : 'plan:membership';
+                $label = trim((string) ($row['plan_name'] ?? ''));
+                $segment = [
+                    'key' => $segmentKey,
+                    'label' => $label !== '' ? $label : 'Členství',
+                    'kind' => (string) ($row['plan_type'] ?? 'membership'),
+                    'sort' => 100 + (int) ($row['plan_sort'] ?? 0),
+                ];
+            } else {
+                $bucket = 'other';
+                $segmentKey = 'other';
+                $segment = ['key' => $segmentKey, 'label' => 'Ostatní', 'kind' => 'other', 'sort' => 900];
+            }
+            $breakdown[$bucket] += $amount;
+            if (!isset($catalog[$segmentKey])) {
+                $catalog[$segmentKey] = $segment + ['amount' => 0.0];
+            }
+            $catalog[$segmentKey]['amount'] += $amount;
             if (isset($days[$dayKey])) {
                 $days[$dayKey]['amount'] += $amount;
                 $days[$dayKey]['count']++;
+                $days[$dayKey][$bucket] += $amount;
+                $current = $days[$dayKey]['parts']->{$segmentKey} ?? 0.0;
+                $days[$dayKey]['parts']->{$segmentKey} = $current + $amount;
             }
-            if (!empty($row['reservation_id'])) {
-                $breakdown['reservations'] += $amount;
-            } elseif (!empty($row['membership_id'])) {
-                $breakdown['memberships'] += $amount;
-            } else {
-                $breakdown['other'] += $amount;
+        }
+
+        uasort($catalog, static fn (array $a, array $b): int => $a['sort'] <=> $b['sort'] ?: strcmp($a['label'], $b['label']));
+        $usedColors = [];
+        $segments = [];
+        foreach ($catalog as $item) {
+            if ($item['amount'] <= 0) {
+                continue;
             }
+            $segments[] = [
+                'key' => $item['key'],
+                'label' => $item['label'],
+                'color' => $this->revenueSegmentColor((string) $item['kind'], $usedColors),
+                'amount' => $item['amount'],
+            ];
         }
 
         return [
             'days' => array_values($days),
             'breakdown' => $breakdown,
+            'segments' => $segments,
             'total' => $total,
             'count' => count($rows),
         ];
+    }
+
+    /**
+     * @param array<string, true> $used
+     */
+    private function revenueSegmentColor(string $kind, array &$used): string
+    {
+        $preferred = [
+            'entry' => '#c6f21a',
+            'single' => '#f0d060',
+            'pack' => '#3ddc97',
+            'monthly' => '#6ec8ff',
+            'credit' => '#ffb86b',
+            'voucher' => '#f2a0c8',
+            'lifetime' => '#e0ae3a',
+            'other' => '#9aa49c',
+        ];
+        $extras = ['#8ab4ff', '#ff8f8f', '#c9a6ff', '#7ee0d0', '#ff9f6e', '#9ad0ff'];
+        $candidate = $preferred[$kind] ?? null;
+        if (is_string($candidate) && !isset($used[$candidate])) {
+            $used[$candidate] = true;
+            return $candidate;
+        }
+        foreach ($extras as $color) {
+            if (!isset($used[$color])) {
+                $used[$color] = true;
+                return $color;
+            }
+        }
+
+        return '#9aa49c';
     }
 
     /**

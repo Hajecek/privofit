@@ -335,7 +335,7 @@
     const price = rate() * count;
     const priced = cover(price);
     const priceLabel = priced.feeMinor > 0
-      ? money(price) + " + poplatek karty " + moneyMinor(priced.feeMinor)
+      ? money(price) + " + poplatek evropské karty " + moneyMinor(priced.feeMinor)
       : money(price);
     const covered = canCover(count);
     if (barTime) barTime.textContent = first.start + "–" + end;

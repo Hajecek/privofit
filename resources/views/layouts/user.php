@@ -80,9 +80,23 @@ $homeLabel = $adminUi ? 'PRIVOFIT – správa' : 'PRIVOFIT – přehled';
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M4 19h16M7 16V9M12 16V5M17 16v-5"/></svg>
                 <span>Tržby</span>
             </a>
-            <a class="side-link <?= user_active('/user/sprava/vstup', true) ?>" href="<?= e(url('/user/sprava/vstup')) ?>" title="Dveře">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+            <?php
+            $doorNavRow = app()->db()->fetch('SELECT id, last_known_state, last_known_door_state FROM doors WHERE is_active = 1 ORDER BY id ASC LIMIT 1');
+            $doorNavLock = strtolower((string) ($doorNavRow['last_known_state'] ?? ''));
+            $doorNavSensor = strtolower((string) ($doorNavRow['last_known_door_state'] ?? ''));
+            $doorNavOpen = in_array($doorNavLock, ['unlocked', 'unlatched', 'unlocking', 'unlatching', 'unlocked_lock_n_go', 'odkleceno'], true)
+                || in_array($doorNavSensor, ['opened', 'open'], true);
+            ?>
+            <a class="side-link <?= user_active('/user/sprava/vstup', true) ?> <?= $doorNavOpen ? 'is-door-open' : 'is-door-closed' ?>" href="<?= e(url('/user/sprava/vstup')) ?>" title="<?= $doorNavOpen ? 'Dveře, otevřeno' : 'Dveře, zavřeno' ?>" data-door-nav="<?= e(url('/user/sprava/vstup/stav')) ?>" data-door-nav-id="<?= (int) ($doorNavRow['id'] ?? 0) ?>">
+                <svg class="door-nav-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                    <g data-door-lock-closed <?= $doorNavOpen ? 'hidden' : '' ?>><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></g>
+                    <g data-door-lock-open <?= $doorNavOpen ? '' : 'hidden' ?>><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/></g>
+                </svg>
                 <span>Dveře</span>
+                <svg class="door-nav-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                    <g data-door-mark-closed <?= $doorNavOpen ? 'hidden' : '' ?>><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></g>
+                    <g data-door-mark-open <?= $doorNavOpen ? '' : 'hidden' ?>><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/></g>
+                </svg>
             </a>
             <a class="side-link <?= user_active('/user/sprava/zajem', true) ?>" href="<?= e(url('/user/sprava/zajem')) ?>" title="Zájem">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/></svg>

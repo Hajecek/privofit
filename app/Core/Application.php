@@ -262,14 +262,16 @@ final class Application
         Session::set('_csp_nonce', $nonce);
         $csp = implode('; ', [
             "default-src 'self'",
-            "img-src 'self' data: blob:",
+            "img-src 'self' data: blob: https://*.stripe.com",
             "font-src 'self' https://fonts.gstatic.com",
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-            "script-src 'self' 'nonce-{$nonce}'",
-            "connect-src 'self'",
+            "script-src 'self' 'nonce-{$nonce}' https://js.stripe.com https://*.js.stripe.com",
+            "connect-src 'self' https://api.stripe.com https://js.stripe.com https://merchant-ui-api.stripe.com https://r.stripe.com https://q.stripe.com https://m.stripe.com",
+            "frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com https://m.stripe.network",
+            "worker-src 'self' blob:",
             "frame-ancestors 'none'",
             "base-uri 'self'",
-            "form-action 'self' https://checkout.stripe.com",
+            "form-action 'self' https://checkout.stripe.com https://hooks.stripe.com",
         ]);
         header('Content-Security-Policy: ' . $csp);
         if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {

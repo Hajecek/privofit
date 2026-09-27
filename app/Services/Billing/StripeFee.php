@@ -7,6 +7,7 @@ namespace App\Services\Billing;
 /**
  * Navýší cenu o poplatek, který Stripe z dané karty opravdu strhne.
  * Evropská karta 1,5 % + 6,50 Kč, britská 2,5 % + 6,50 Kč, ostatní 3,15 % + 6,50 Kč.
+ * Link bez země karty se účtuje jako zahraniční: Stripe ho tak strhl, když byl původ karty United States.
  *
  * @phpstan-type Quote array{net:string,fee:string,charge:string,netMinor:int,feeMinor:int,chargeMinor:int}
  */
@@ -42,18 +43,93 @@ final class StripeFee
     public static function rateForCountry(string $country): array
     {
         $country = strtoupper(trim($country));
-        $eea = [
-            'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR',
-            'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK',
-            'SI', 'ES', 'SE', 'IS', 'LI', 'NO',
-        ];
-        if ($country === '' || in_array($country, $eea, true)) {
+        if ($country === '' || in_array($country, self::eeaCountries(), true)) {
             return [self::basisPoints(), self::fixedMinor()];
         }
         if ($country === 'GB' || $country === 'UK') {
             return [250, self::fixedMinor()];
         }
         return [315, self::fixedMinor()];
+    }
+
+    /** @return list<string> */
+    public static function eeaCountries(): array
+    {
+        return [
+            'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR',
+            'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK',
+            'SI', 'ES', 'SE', 'IS', 'LI', 'NO',
+        ];
+    }
+
+    public static function band(string $country): string
+    {
+        $country = strtoupper(trim($country));
+        if ($country === 'GB' || $country === 'UK') {
+            return 'gb';
+        }
+        if ($country === '' || in_array($country, self::eeaCountries(), true)) {
+            return 'eea';
+        }
+        return 'international';
+    }
+
+    public static function label(string $country): string
+    {
+        return match (self::band($country)) {
+            'gb' => 'Britská karta',
+            'international' => 'Zahraniční karta',
+            default => 'Evropská karta',
+        };
+    }
+
+    /**
+     * Země, podle které se má navýšit cena. Prázdná země zůstává evropská sazba.
+     * Link bez země karty vrací US, protože takový Link Stripe účtuje zahraniční sazbou.
+     *
+     * @param array<string, mixed> $method
+     * @return array{country:string,assumed:bool,type:string}
+     */
+    public static function inspectMethod(array $method): array
+    {
+        $type = strtolower(trim((string) ($method['type'] ?? '')));
+        $card = is_array($method['card'] ?? null) ? $method['card'] : [];
+        $wallet = is_array($card['wallet'] ?? null) ? $card['wallet'] : [];
+        $link = is_array($method['link'] ?? null) ? $method['link'] : [];
+        if ($link === [] && is_array($wallet['link'] ?? null)) {
+            $link = $wallet['link'];
+        }
+        $country = strtoupper(trim((string) ($card['country'] ?? '')));
+        if ($country === '') {
+            $country = strtoupper(trim((string) ($link['country'] ?? '')));
+        }
+        if ($country !== '') {
+            return ['country' => $country, 'assumed' => false, 'type' => $type !== '' ? $type : 'card'];
+        }
+        $isLink = $type === 'link' || (string) ($wallet['type'] ?? '') === 'link';
+        if ($isLink) {
+            return ['country' => 'US', 'assumed' => true, 'type' => 'link'];
+        }
+        return ['country' => '', 'assumed' => false, 'type' => $type !== '' ? $type : 'card'];
+    }
+
+    /** @param array<string, mixed> $method @return Quote */
+    public static function coverForMethod(string|float|int $netAmount, array $method): array
+    {
+        $inspected = self::inspectMethod($method);
+        return self::coverFor($netAmount, $inspected['country']);
+    }
+
+    /**
+     * @return array{eea:Quote,gb:Quote,international:Quote}
+     */
+    public static function variants(string|float|int $netAmount): array
+    {
+        return [
+            'eea' => self::coverFor($netAmount, 'CZ'),
+            'gb' => self::coverFor($netAmount, 'GB'),
+            'international' => self::coverFor($netAmount, 'US'),
+        ];
     }
 
     /** @return Quote */

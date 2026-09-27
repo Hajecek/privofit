@@ -67,7 +67,7 @@ $daysLabel = static function (array $plan): string {
             $cardFee = \App\Services\Billing\StripeFee::cover((string) $plan['price']);
             if ((float) $cardFee['fee'] > 0):
             ?>
-                <p class="muted">K zaplacení <?= e(number_format((float) $cardFee['charge'], 2, ',', ' ')) ?> Kč, z toho poplatek karty <?= e(number_format((float) $cardFee['fee'], 2, ',', ' ')) ?> Kč.</p>
+                <p class="muted">Evropská karta <?= e(number_format((float) $cardFee['charge'], 2, ',', ' ')) ?> Kč, z toho poplatek <?= e(number_format((float) $cardFee['fee'], 2, ',', ' ')) ?> Kč. Britská a zahraniční karta, včetně Linku, se přepočítá před zaplacením.</p>
             <?php endif; ?>
             <ul>
                 <li><?= e($daysLabel($plan)) ?></li>

@@ -33,37 +33,14 @@ final class CheckoutService
             throw new HttpException(422, 'Tuto rezervaci není potřeba platit.');
         }
         $priced = StripeFee::cover($amount);
-        $payment = $this->payments->createStripeHold($user, $priced['net'], (int) $reservation['id'], $priced['fee'], $priced['charge']);
-        $localStart = Clock::format((string) $reservation['starts_at'], 'j. n. Y H:i');
-        $localEnd = Clock::format((string) $reservation['ends_at'], 'H:i');
-        $date = Clock::format((string) $reservation['starts_at'], 'Y-m-d');
-        $success = $app->absoluteUrl('/user/rezervace/platba') . '?session_id={CHECKOUT_SESSION_ID}';
-        $cancel = $app->absoluteUrl('/user/rezervace/platba/zruseno') . '?platba=' . rawurlencode((string) $payment['public_id']) . '&date=' . rawurlencode($date);
-        $expires = time() + 35 * 60;
         try {
-            $session = StripeGateway::fromConfig()->createCheckoutSession(
-                $priced['netMinor'],
-                'czk',
-                'PRIVOFIT rezervace ' . $localStart . '–' . $localEnd,
-                $success,
-                $cancel,
-                (string) $payment['public_id'],
-                [
-                    'payment' => (string) $payment['public_id'],
-                    'reservation' => (string) $reservation['public_id'],
-                    'user' => (string) ($user['public_id'] ?? $user['id']),
-                    'net' => $priced['net'],
-                    'fee' => $priced['fee'],
-                ],
-                $expires,
-                $priced['feeMinor'],
-            );
+            StripeGateway::fromConfig();
         } catch (HttpException $e) {
             $this->reservations->failPending($reservation);
             throw $e;
         }
-        $this->payments->attachProviderReference((int) $payment['id'], $session['id']);
-        return $session['url'];
+        $payment = $this->payments->createStripeHold($user, $priced['net'], (int) $reservation['id'], $priced['fee'], $priced['charge']);
+        return $app->absoluteUrl('/user/platba/' . rawurlencode((string) $payment['public_id']));
     }
 
     public function startMembership(array $user, array $membership, Application $app): string
@@ -73,34 +50,14 @@ final class CheckoutService
             throw new HttpException(422, 'Tenhle tarif nemá cenu k zaplacení.');
         }
         $priced = StripeFee::cover($amount);
-        $payment = $this->payments->createStripeMembership($user, $priced['net'], (int) $membership['id'], $priced['fee'], $priced['charge']);
-        $entries = $membership['entries'] === null ? 'neomezené vstupy' : ((int) $membership['entries'] . ' vstupů');
-        $success = $app->absoluteUrl('/user/clenstvi/platba') . '?session_id={CHECKOUT_SESSION_ID}';
-        $cancel = $app->absoluteUrl('/user/clenstvi/platba/zruseno') . '?platba=' . rawurlencode((string) $payment['public_id']);
         try {
-            $session = StripeGateway::fromConfig()->createCheckoutSession(
-                $priced['netMinor'],
-                'czk',
-                'PRIVOFIT ' . (string) ($membership['plan_name'] ?? 'členství') . ' · ' . $entries,
-                $success,
-                $cancel,
-                (string) $payment['public_id'],
-                [
-                    'payment' => (string) $payment['public_id'],
-                    'membership' => (string) $membership['public_id'],
-                    'user' => (string) ($user['public_id'] ?? $user['id']),
-                    'net' => $priced['net'],
-                    'fee' => $priced['fee'],
-                ],
-                time() + 35 * 60,
-                $priced['feeMinor'],
-            );
+            StripeGateway::fromConfig();
         } catch (HttpException $e) {
             (new MembershipService($this->db))->cancelPending((int) $membership['id'], (int) $user['id']);
             throw $e;
         }
-        $this->payments->attachProviderReference((int) $payment['id'], $session['id']);
-        return $session['url'];
+        $payment = $this->payments->createStripeMembership($user, $priced['net'], (int) $membership['id'], $priced['fee'], $priced['charge']);
+        return $app->absoluteUrl('/user/platba/' . rawurlencode((string) $payment['public_id']));
     }
 
     public function fulfillSession(string $sessionId): array
@@ -119,6 +76,10 @@ final class CheckoutService
         $type = (string) ($event['type'] ?? '');
         $object = is_array($event['data']['object'] ?? null) ? $event['data']['object'] : [];
         $sessionId = (string) ($object['id'] ?? '');
+        if ($type === 'payment_intent.succeeded') {
+            $this->completeFromIntent($object);
+            return;
+        }
         if ($type === 'checkout.session.completed' || $type === 'checkout.session.async_payment_succeeded') {
             if (($object['payment_status'] ?? '') === 'paid' || ($object['status'] ?? '') === 'complete') {
                 $this->completeFromSession($object, (string) ($object['payment_intent'] ?? $sessionId));
@@ -163,13 +124,162 @@ final class CheckoutService
         if (!$payment) {
             throw new HttpException(404, 'Platba k této relaci nebyla nalezena.');
         }
-        $eventKey = 'stripe:' . ((string) ($session['id'] ?? $reference));
-        $this->payments->markPaid((int) $payment['id'], $reference !== '' ? $reference : (string) $session['id'], $eventKey);
-        $stripeRef = (string) ($session['id'] ?? '');
-        if ($stripeRef === '') {
-            $stripeRef = $reference;
+        $stripeRef = $reference !== '' ? $reference : (string) ($session['id'] ?? '');
+        return $this->finish($payment, $stripeRef);
+    }
+
+    /** @return array<string, mixed> */
+    public function page(string $publicId, array $user): array
+    {
+        $payment = $this->ownedPayment($publicId, $user);
+        if ($payment['status'] === 'paid') {
+            return ['payment' => $payment, 'paid' => true];
         }
-        $this->payments->captureStripeFacts((int) $payment['id'], $stripeRef);
+        if ($payment['status'] !== 'pending') {
+            throw new HttpException(422, 'Tuhle platbu už nejde dokončit.');
+        }
+        $net = number_format((float) ($payment['amount'] ?? 0), 2, '.', '');
+        $variants = StripeFee::variants($net);
+        $summary = $this->summary($payment);
+        return [
+            'payment' => $payment,
+            'paid' => false,
+            'summary' => $summary,
+            'variants' => $variants,
+            'shown' => $variants['eea'],
+            'publishableKey' => trim((string) env_value('STRIPE_PUBLISHABLE_KEY', '')),
+            'cancelUrl' => $summary['cancelUrl'],
+        ];
+    }
+
+    /**
+     * Když zobrazená částka nesedí na kartu, vrátí novou cenu a nic nestrhne.
+     *
+     * @return array<string, mixed>
+     */
+    public function confirm(array $user, string $publicId, string $confirmationTokenId, int $shownMinor, Application $app): array
+    {
+        $payment = $this->ownedPayment($publicId, $user);
+        if ($payment['status'] === 'paid') {
+            return [
+                'ready' => true,
+                'status' => 'succeeded',
+                'intentId' => (string) ($payment['provider_reference'] ?? ''),
+                'returnUrl' => $this->returnUrl($app, (string) $payment['public_id']),
+            ];
+        }
+        if ($payment['status'] !== 'pending') {
+            throw new HttpException(422, 'Tuhle platbu už nejde dokončit.');
+        }
+        $gateway = StripeGateway::fromConfig();
+        $token = $gateway->retrieveConfirmationToken($confirmationTokenId);
+        $preview = is_array($token['payment_method_preview'] ?? null) ? $token['payment_method_preview'] : [];
+        $net = number_format((float) ($payment['amount'] ?? 0), 2, '.', '');
+        $inspected = StripeFee::inspectMethod($preview);
+        $priced = StripeFee::coverFor($net, $inspected['country']);
+        $quote = $this->publicQuote($priced, $inspected);
+        if ($shownMinor !== $priced['chargeMinor']) {
+            return ['ready' => false] + $quote;
+        }
+        $summary = $this->summary($payment);
+        $returnUrl = $this->returnUrl($app, (string) $payment['public_id']);
+        $this->payments->applyStripeQuote((int) $payment['id'], $priced);
+        $existingId = (string) ($payment['provider_reference'] ?? '');
+        if (str_starts_with($existingId, 'pi_')) {
+            $previous = $gateway->retrievePaymentIntent($existingId);
+            $previousStatus = (string) ($previous['status'] ?? '');
+            if ($previousStatus === 'succeeded') {
+                $this->finish($payment, $existingId);
+                return [
+                    'ready' => true,
+                    'status' => 'succeeded',
+                    'intentId' => $existingId,
+                    'clientSecret' => '',
+                    'returnUrl' => $returnUrl,
+                ] + $quote;
+            }
+            if ($previousStatus === 'processing') {
+                throw new HttpException(402, 'Platba se dokončuje. Počkej chvíli a obnov stránku.');
+            }
+            if (in_array($previousStatus, ['requires_action', 'requires_confirmation', 'requires_payment_method'], true)) {
+                $gateway->cancelPaymentIntent($existingId);
+            }
+        }
+        $intent = $gateway->chargePaymentMethod(
+            $confirmationTokenId,
+            $priced['chargeMinor'],
+            'czk',
+            (string) $payment['public_id'] . ':' . $confirmationTokenId . ':' . $priced['chargeMinor'],
+            $summary['description'],
+            $returnUrl,
+            [
+                'payment' => (string) $payment['public_id'],
+                'user' => (string) ($user['public_id'] ?? $user['id']),
+                'net' => $priced['net'],
+                'fee' => $priced['fee'],
+                'card_country' => $inspected['country'],
+            ],
+            trim((string) ($user['email'] ?? '')),
+        );
+        if ($intent['id'] !== '') {
+            $this->payments->attachProviderReference((int) $payment['id'], $intent['id']);
+        }
+        if ($intent['status'] === 'succeeded') {
+            $this->finish($payment, $intent['id']);
+        }
+        return [
+            'ready' => true,
+            'status' => $intent['status'],
+            'intentId' => $intent['id'],
+            'clientSecret' => $intent['status'] === 'requires_action' ? $intent['client_secret'] : '',
+            'returnUrl' => $returnUrl,
+        ] + $quote;
+    }
+
+    public function fulfillIntent(string $intentId, array $user): array
+    {
+        $intent = StripeGateway::fromConfig()->retrievePaymentIntent($intentId);
+        if ((string) ($intent['status'] ?? '') !== 'succeeded') {
+            throw new HttpException(402, 'Platba ještě neprošla.');
+        }
+        $publicId = (string) (($intent['metadata']['payment'] ?? null) ?: '');
+        $payment = $publicId !== '' ? $this->payments->findByPublicId($publicId) : null;
+        if (!$payment) {
+            $payment = $this->payments->findByProviderReference($intentId);
+        }
+        if (!$payment || (int) $payment['user_id'] !== (int) $user['id']) {
+            throw new HttpException(403, 'Tato platba nepatří k tvému účtu.');
+        }
+        return $this->finish($payment, $intentId);
+    }
+
+    /** @param array<string, mixed> $intent */
+    private function completeFromIntent(array $intent): void
+    {
+        if ((string) ($intent['status'] ?? '') !== 'succeeded') {
+            return;
+        }
+        $intentId = (string) ($intent['id'] ?? '');
+        $publicId = (string) (($intent['metadata']['payment'] ?? null) ?: '');
+        $payment = $publicId !== '' ? $this->payments->findByPublicId($publicId) : null;
+        if (!$payment && $intentId !== '') {
+            $payment = $this->payments->findByProviderReference($intentId);
+        }
+        if (!$payment || $intentId === '') {
+            return;
+        }
+        $this->finish($payment, $intentId);
+    }
+
+    /** @param array<string, mixed> $payment @return array<string, mixed> */
+    private function finish(array $payment, string $reference): array
+    {
+        $reference = trim($reference);
+        if ($reference === '') {
+            throw new HttpException(502, 'Stripe nevrátil identifikátor platby.');
+        }
+        $this->payments->markPaid((int) $payment['id'], $reference, 'stripe:' . $reference);
+        $this->payments->captureStripeFacts((int) $payment['id'], $reference);
         if (!empty($payment['membership_id'])) {
             (new MembershipService($this->db))->activatePurchase((int) $payment['membership_id']);
         }
@@ -178,8 +288,83 @@ final class CheckoutService
             return $this->payments->findByPublicId((string) $payment['public_id']) ?? $payment;
         }
         $user = AuthService::make($this->db)->findById((int) $reservation['user_id']);
-        $this->reservations->confirmPending($reservation, $user);
+        $this->reservations->confirmPending($reservation, $user ?: []);
         return $this->payments->findByPublicId((string) $payment['public_id']) ?? $payment;
+    }
+
+    /** @param array<string, mixed> $payment @return array<string, mixed> */
+    private function ownedPayment(string $publicId, array $user): array
+    {
+        $payment = $this->payments->findByPublicId(trim($publicId));
+        if (!$payment || (int) $payment['user_id'] !== (int) $user['id']) {
+            throw new HttpException(404, 'Platba nebyla nalezena.');
+        }
+        return $payment;
+    }
+
+    /** @param array<string, mixed> $payment @return array{title:string,description:string,cancelUrl:string,doneUrl:string,doneMessage:string} */
+    private function summary(array $payment): array
+    {
+        if (!empty($payment['membership_id'])) {
+            $membership = $this->db->fetch(
+                'SELECT m.public_id, p.name AS plan_name, p.entries
+                 FROM memberships m
+                 INNER JOIN membership_plans p ON p.id = m.plan_id
+                 WHERE m.id = :id',
+                ['id' => (int) $payment['membership_id']]
+            ) ?? [];
+            $entries = ($membership['entries'] ?? null) === null ? 'neomezené vstupy' : ((int) $membership['entries'] . ' vstupů');
+            $name = (string) ($membership['plan_name'] ?? 'členství');
+            return [
+                'title' => $name,
+                'description' => 'PRIVOFIT ' . $name . ' · ' . $entries,
+                'cancelUrl' => '/user/clenstvi/platba/zruseno?platba=' . rawurlencode((string) $payment['public_id']),
+                'doneUrl' => '/user',
+                'doneMessage' => 'Platba prošla. Členství je na účtu a vstupy můžeš čerpat rezervací dne.',
+            ];
+        }
+        $reservation = $payment['reservation_id'] ? $this->reservations->findById((int) $payment['reservation_id']) : null;
+        $when = $reservation ? Clock::format((string) $reservation['starts_at'], 'j. n. Y H:i') . '–' . Clock::format((string) $reservation['ends_at'], 'H:i') : '';
+        $date = $reservation ? Clock::format((string) $reservation['starts_at'], 'Y-m-d') : '';
+        $cancel = '/user/rezervace/platba/zruseno?platba=' . rawurlencode((string) $payment['public_id']);
+        if ($date !== '') {
+            $cancel .= '&date=' . rawurlencode($date);
+        }
+        return [
+            'title' => $when !== '' ? 'Rezervace ' . $when : 'Rezervace',
+            'description' => 'PRIVOFIT rezervace' . ($when !== '' ? ' ' . $when : ''),
+            'cancelUrl' => $cancel,
+            'doneUrl' => '/user/moje-rezervace',
+            'doneMessage' => 'Platba prošla a rezervace je potvrzená.',
+        ];
+    }
+
+    /**
+     * @param array{net:string,fee:string,charge:string,netMinor:int,feeMinor:int,chargeMinor:int} $priced
+     * @param array{country:string,assumed:bool,type:string} $inspected
+     * @return array<string, mixed>
+     */
+    private function publicQuote(array $priced, array $inspected): array
+    {
+        return [
+            'fee' => $priced['fee'],
+            'charge' => $priced['charge'],
+            'chargeMinor' => $priced['chargeMinor'],
+            'feeMinor' => $priced['feeMinor'],
+            'band' => StripeFee::band($inspected['country']),
+            'label' => StripeFee::label($inspected['country']),
+            'assumed' => $inspected['assumed'],
+        ];
+    }
+
+    private function returnUrl(Application $app, string $publicId): string
+    {
+        return $app->absoluteUrl('/user/platba/navrat') . '?platba=' . rawurlencode($publicId);
+    }
+
+    public function destination(array $payment): array
+    {
+        return $this->summary($payment);
     }
 
     /** @param array<string, mixed> $session */

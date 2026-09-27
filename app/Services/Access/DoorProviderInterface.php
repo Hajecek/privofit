@@ -10,5 +10,9 @@ interface DoorProviderInterface
 
     public function open(array $door): DoorCommandResult;
 
+    public function unlock(array $door): DoorCommandResult;
+
+    public function close(array $door): DoorCommandResult;
+
     public function status(array $door): DoorStatus;
 }

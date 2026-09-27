@@ -206,6 +206,31 @@ final class ApplicationFlowTest extends TestCase
         AccessControlService::make($this->db)->open($user, '127.0.0.1');
     }
 
+    public function testAdminSwitchOpensAndClosesDoor(): void
+    {
+        if ((string) env_value('DOOR_PROVIDER', 'mock') === 'nuki' && (string) env_value('NUKI_API_TOKEN', '') !== '') {
+            $this->markTestSkipped('Ostrý Nuki provider, test ovládání přeskočen.');
+        }
+        $user = $this->createVerifiedUser('admdoor');
+        $door = $this->db->fetch('SELECT * FROM doors WHERE is_active = 1 ORDER BY id ASC LIMIT 1');
+        if (!$door) {
+            $this->markTestSkipped('V databázi nejsou aktivní dveře.');
+        }
+        $this->db->query('DELETE FROM door_command_locks WHERE door_id = :id', ['id' => (int) $door['id']]);
+        $access = AccessControlService::make($this->db);
+        $opened = $access->adminSet($user, (int) $door['id'], true, '127.0.0.1');
+        $this->assertTrue($opened['accepted']);
+        $fresh = $this->db->fetch('SELECT last_known_state, last_known_door_state FROM doors WHERE id = :id', ['id' => (int) $door['id']]);
+        $this->assertSame('unlocked', $fresh['last_known_state']);
+        $this->assertSame('opened', $fresh['last_known_door_state']);
+        $this->db->query('DELETE FROM door_command_locks WHERE door_id = :id', ['id' => (int) $door['id']]);
+        $closed = $access->adminSet($user, (int) $door['id'], false, '127.0.0.1');
+        $this->assertTrue($closed['accepted']);
+        $fresh = $this->db->fetch('SELECT last_known_state, last_known_door_state FROM doors WHERE id = :id', ['id' => (int) $door['id']]);
+        $this->assertSame('locked', $fresh['last_known_state']);
+        $this->assertSame('closed', $fresh['last_known_door_state']);
+    }
+
     public function testExpiredMembershipDoesNotGrantEntries(): void
     {
         $user = $this->createVerifiedUser('mem');

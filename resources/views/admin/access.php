@@ -3,197 +3,181 @@ $status = is_array($status ?? null) ? $status : [];
 $doors = is_array($doors ?? null) ? $doors : [];
 $logs = is_array($logs ?? null) ? $logs : [];
 $configured = !empty($status['configured']);
-$online = !empty($status['online']);
 $testMode = !empty($status['test_mode']);
-$batteryCritical = !empty($status['battery_critical']);
-$battery = $status['battery_percent'] ?? null;
-$lockState = (string) ($status['lock_state'] ?? '');
-$doorState = (string) ($status['door_state'] ?? '');
-$provider = (string) ($status['provider'] ?? 'n/a');
+$liveOnline = !empty($status['online']);
+$liveLock = (string) ($status['lock_state'] ?? '');
+$liveDoor = (string) ($status['door_state'] ?? '');
+$liveBattery = $status['battery_percent'] ?? null;
+$liveCritical = !empty($status['battery_critical']);
 
-$lockLabel = match (strtolower($lockState)) {
-    'locked', 'zakleceno', 'locked_lock' => 'Zamčeno',
-    'unlocked', 'odkleceno', 'unlocked_lock' => 'Odemčeno',
-    'locking' => 'Zamyká se',
-    'unlocking' => 'Odemyká se',
-    'unlatched' => 'Odjištěno',
-    '' => 'Neznámý',
-    default => $lockState !== '' ? $lockState : 'Neznámý',
-};
+$primaryId = 0;
+foreach ($doors as $door) {
+    if (!empty($door['is_active'])) {
+        $primaryId = (int) ($door['id'] ?? 0);
+        break;
+    }
+}
 
-$heroClass = !$configured ? 'is-wait' : ($online ? 'is-open' : 'is-wait');
-$heroEyebrow = !$configured ? 'Neaktivní' : ($online ? 'Online' : 'Offline');
-$heroTitle = !$configured
-    ? 'Dveře ještě nejsou nastavené'
-    : ($online ? 'Zámek je připojený' : 'Zámek teď neodpovídá');
-$heroLead = !$configured
-    ? 'Přidej aktivní dveře a poskytovatele. Do té doby běží bezpečný testovací režim.'
-    : ($testMode
-        ? 'Testovací provider. Příkazy se ověří, fyzické dveře se neotevřou.'
-        : 'Nuki token zůstává na serveru. Ostré otevírání jde jen přes ověřený backend.');
+$openLocks = ['unlocked', 'unlatched', 'unlocking', 'unlatching', 'unlocked_lock_n_go', 'odkleceno'];
+$openSensors = ['opened', 'open'];
+
+$reasonLabels = [
+    'admin_open' => 'Správce otevřel',
+    'admin_close' => 'Správce zavřel',
+    'unverified' => 'Neověřený e-mail',
+    'inactive' => 'Neaktivní účet',
+    'no_reservation' => 'Bez rezervace',
+    'no_door' => 'Chybí dveře',
+    'no_permission' => 'Bez oprávnění',
+    'rate_limited' => 'Moc pokusů',
+    'door_busy' => 'Zámek je zaneprázdněný',
+    'not_configured' => 'Není nastaveno',
+    'connection' => 'Spojení selhalo',
+    'http' => 'Zámek odmítl příkaz',
+];
 ?>
 <div class="page-head">
     <div>
         <p class="eyebrow">SPRÁVA</p>
-        <h1>Vstupní systém</h1>
-        <p class="muted">Stav zámku, režim dveří a logy vstupů členů.</p>
+        <h1>Dveře</h1>
+        <p class="muted">Stav zámku je v přepínači vedle názvu. Stránka se při změně neobnovuje.</p>
     </div>
 </div>
 
-<section class="entry-hero card door-admin-hero <?= e($heroClass) ?>">
-    <div>
-        <p class="eyebrow"><?= e($heroEyebrow) ?></p>
-        <h2><?= e($heroTitle) ?></h2>
-        <p class="entry-lead"><?= e($heroLead) ?></p>
-        <div class="entry-facts door-admin-facts">
-            <div>
-                <span>Poskytovatel</span>
-                <strong><?= e(strtoupper($provider)) ?></strong>
-            </div>
-            <div>
-                <span>Režim</span>
-                <strong><?= $testMode ? 'Test' : 'Produkce' ?></strong>
-            </div>
-            <div>
-                <span>Zámek</span>
-                <strong><?= e($lockLabel) ?></strong>
-            </div>
-            <div>
-                <span>Baterie</span>
-                <strong><?= $battery === null || $battery === '' ? '—' : e((string) $battery) . '%' ?></strong>
-            </div>
-        </div>
-        <div class="door-admin-badges">
-            <?php if ($configured): ?>
-                <span class="badge <?= $online ? 'badge-ok' : 'badge-bad' ?>"><?= $online ? 'Online' : 'Offline' ?></span>
-            <?php else: ?>
-                <span class="badge badge-warn">Není nakonfigurováno</span>
-            <?php endif; ?>
-            <span class="badge <?= $testMode ? 'badge-warn' : 'badge-ok' ?>"><?= $testMode ? 'Test režim' : 'Nuki' ?></span>
-            <?php if ($batteryCritical): ?>
-                <span class="badge badge-bad">Kritická baterie</span>
-            <?php endif; ?>
-            <?php if ($doorState !== ''): ?>
-                <span class="badge badge-muted">Dveře: <?= e($doorState) ?></span>
-            <?php endif; ?>
-        </div>
-    </div>
-    <div class="entry-mark" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-            <?php if ($online && $configured): ?>
-                <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/>
-            <?php else: ?>
-                <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>
-            <?php endif; ?>
-        </svg>
-    </div>
-</section>
-
-<?php if ($doors !== []): ?>
-<section class="card door-admin-panel">
-    <div class="door-admin-panel-head">
+<?php if ($doors === []): ?>
+<section class="door-panel is-closed">
+    <div class="door-panel-top">
         <div>
-            <p class="eyebrow">ZAŘÍZENÍ</p>
-            <h2>Registrované dveře</h2>
+            <p class="eyebrow">ZÁMEK</p>
+            <h2>Žádné dveře</h2>
+            <p class="door-panel-lead">Až bude v systému aktivní zámek, objeví se tady přepínač.</p>
         </div>
-        <span class="badge badge-muted"><?= count($doors) ?></span>
-    </div>
-    <div class="door-admin-list">
-        <?php foreach ($doors as $door): ?>
-            <?php
-            $active = !empty($door['is_active']);
-            $crit = !empty($door['battery_critical']);
-            $pct = $door['last_battery_percent'] ?? null;
-            ?>
-            <article class="door-admin-item<?= $active ? '' : ' is-off' ?>">
-                <div class="door-admin-item-main">
-                    <strong><?= e((string) ($door['name'] ?? 'Dveře')) ?></strong>
-                    <span class="muted"><?= e(strtoupper((string) ($door['provider'] ?? 'n/a'))) ?><?= !empty($door['external_id']) ? ' · ' . e((string) $door['external_id']) : '' ?></span>
-                </div>
-                <div class="door-admin-item-meta">
-                    <span class="badge <?= $active ? 'badge-ok' : 'badge-muted' ?>"><?= $active ? 'Aktivní' : 'Neaktivní' ?></span>
-                    <?php if ($pct !== null && $pct !== ''): ?>
-                        <span class="badge <?= $crit ? 'badge-bad' : 'badge-muted' ?>"><?= e((string) $pct) ?>%</span>
-                    <?php endif; ?>
-                    <?php if (!empty($door['last_known_state'])): ?>
-                        <span class="badge badge-muted"><?= e((string) $door['last_known_state']) ?></span>
-                    <?php endif; ?>
-                </div>
-            </article>
-        <?php endforeach; ?>
     </div>
 </section>
+<?php else: ?>
+<div class="door-board">
+    <?php foreach ($doors as $door): ?>
+        <?php
+        $id = (int) ($door['id'] ?? 0);
+        $active = !empty($door['is_active']);
+        $live = $configured && $id === $primaryId;
+        $lock = strtolower($live ? $liveLock : (string) ($door['last_known_state'] ?? ''));
+        $sensor = strtolower($live ? $liveDoor : (string) ($door['last_known_door_state'] ?? ''));
+        $isOpen = in_array($lock, $openLocks, true) || in_array($sensor, $openSensors, true);
+        $batteryRaw = $live ? $liveBattery : ($door['last_battery_percent'] ?? null);
+        $batteryNum = ($batteryRaw === null || $batteryRaw === '') ? null : max(0, min(100, (int) $batteryRaw));
+        $critical = $live ? $liveCritical : !empty($door['battery_critical']);
+        $batteryLow = $critical || ($batteryNum !== null && $batteryNum <= 15);
+        $online = $live ? $liveOnline : !empty($door['last_online_at']);
+        $provider = strtoupper((string) ($door['provider'] ?? ($status['provider'] ?? 'n/a')));
+        ?>
+        <section class="door-panel<?= $isOpen ? ' is-open' : ' is-closed' ?><?= $active ? '' : ' is-off' ?>" data-door-id="<?= $id ?>" data-door-status="<?= e(url('/user/sprava/vstup/stav')) ?>">
+            <div class="door-panel-top">
+                <div>
+                    <p class="eyebrow"><?= e($provider) ?></p>
+                    <h2><?= e((string) ($door['name'] ?? 'Dveře')) ?></h2>
+                </div>
+                <form method="post" action="<?= e(url('/user/sprava/vstup/stav')) ?>" class="door-switch-form" data-door-form>
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="door_id" value="<?= $id ?>">
+                    <div class="door-seg" role="radiogroup" aria-label="<?= e('Otevřít nebo zavřít ' . (string) ($door['name'] ?? 'dveře')) ?>">
+                        <label class="door-seg-opt">
+                            <input type="radio" name="state" value="close" data-door-input <?= $isOpen ? '' : 'checked' ?> <?= $active ? '' : 'disabled' ?>>
+                            <span>Zavřeno</span>
+                        </label>
+                        <label class="door-seg-opt">
+                            <input type="radio" name="state" value="open" data-door-input <?= $isOpen ? 'checked' : '' ?> <?= $active ? '' : 'disabled' ?>>
+                            <span>Otevřeno</span>
+                        </label>
+                    </div>
+                    <p class="door-switch-note" data-door-note hidden></p>
+                    <button class="btn btn-secondary door-switch-save" type="submit">Potvrdit</button>
+                </form>
+            </div>
+            <div class="door-stats">
+                <article class="door-stat<?= $active && $online ? ' is-on' : ' is-off' ?>" data-door-online>
+                    <span class="door-stat-k">Spojení</span>
+                    <strong><i class="door-dot" aria-hidden="true"></i><span data-door-online-label><?= $active && $online ? 'Online' : 'Offline' ?></span></strong>
+                    <span class="door-stat-sub" data-door-online-sub><?= $active && $online ? 'Zámek odpovídá' : 'Zámek teď neodpovídá' ?></span>
+                </article>
+                <article class="door-stat<?= $batteryLow ? ' is-low' : '' ?>" data-door-battery-stat>
+                    <span class="door-stat-k">Baterie</span>
+                    <strong>
+                        <span class="door-bat<?= $batteryLow ? ' is-low' : '' ?>" data-door-bat aria-hidden="true"><span class="door-bat-fill" data-door-fill style="width: <?= $batteryNum ?? 0 ?>%"></span></span>
+                        <span data-door-battery><?= $batteryNum === null ? '—' : e((string) $batteryNum) . '%' ?></span>
+                    </strong>
+                    <span class="door-stat-sub" data-door-battery-sub><?= $batteryNum === null ? 'Stav není známý' : ($batteryLow ? 'Dochází, vyměň článek' : 'Nabití je v pořádku') ?></span>
+                </article>
+                <article class="door-stat door-stat-mode<?= $testMode ? ' is-test' : ' is-live' ?>">
+                    <span class="door-stat-k">Režim</span>
+                    <strong><?= $testMode ? 'Test' : 'Ostrý' ?></strong>
+                    <span class="door-stat-sub"><?= $testMode ? 'Fyzické dveře se nepohnou' : 'Příkaz jde rovnou na zámek' ?></span>
+                </article>
+            </div>
+        </section>
+    <?php endforeach; ?>
+</div>
 <?php endif; ?>
 
-<section class="card door-admin-panel door-admin-verify">
-    <div class="door-admin-panel-head">
-        <div>
-            <p class="eyebrow">KRITICKÁ AKCE</p>
-            <h2>Testovací ověření</h2>
-            <p class="muted">Pro potvrzení test režimu zadej znovu své heslo. Ostré otevření se aktivuje až po konfiguraci Nuki.</p>
-        </div>
-    </div>
-    <form method="post" action="<?= e(url('/user/sprava/vstup/test')) ?>" class="door-admin-form">
-        <?= csrf_field() ?>
-        <div class="field">
-            <label for="door-verify-password">Tvoje heslo</label>
-            <input id="door-verify-password" type="password" name="password" autocomplete="current-password" required>
-        </div>
-        <button class="btn btn-danger" type="submit">Potvrdit testovací režim</button>
-    </form>
-</section>
-
-<section class="card door-admin-panel">
-    <div class="door-admin-panel-head">
+<section class="door-logs" id="logy">
+    <div class="door-logs-head">
         <div>
             <p class="eyebrow">HISTORIE</p>
             <h2>Logy vstupů</h2>
-            <p class="muted">Posledních <?= count($logs) ?> pokusů o otevření.</p>
+            <p class="muted">Samostatný přehled posledních <?= count($logs) ?> pokusů. Na ovládání dveří nemá vliv.</p>
         </div>
     </div>
-    <?php if ($logs === []): ?>
-        <p class="door-admin-empty muted">Zatím žádné záznamy.</p>
-    <?php else: ?>
-        <div class="table-wrap door-admin-table">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Čas</th>
-                        <th>Uživatel</th>
-                        <th>Autorizace</th>
-                        <th>Příkaz</th>
-                        <th>Důvod</th>
-                    </tr>
-                </thead>
-                <tbody>
-                <?php foreach ($logs as $log): ?>
-                    <?php
-                    $authOk = ($log['authorization_result'] ?? '') === 'granted';
-                    $cmd = (string) ($log['command_result'] ?? 'not_sent');
-                    $cmdClass = match ($cmd) {
-                        'accepted' => 'badge-ok',
-                        'failed', 'timeout', 'conflict' => 'badge-bad',
-                        default => 'badge-muted',
-                    };
-                    $cmdLabel = match ($cmd) {
-                        'accepted' => 'Přijat',
-                        'failed' => 'Selhal',
-                        'timeout' => 'Timeout',
-                        'conflict' => 'Konflikt',
-                        'not_sent' => 'Neodeslán',
-                        default => $cmd,
-                    };
-                    ?>
-                    <tr>
-                        <td><?= e(format_datetime((string) ($log['created_at'] ?? ''))) ?></td>
-                        <td><?= e((string) ($log['username'] ?? '—')) ?></td>
-                        <td><span class="badge <?= $authOk ? 'badge-ok' : 'badge-bad' ?>"><?= $authOk ? 'Povoleno' : 'Zamítnuto' ?></span></td>
-                        <td><span class="badge <?= e($cmdClass) ?>"><?= e($cmdLabel) ?></span></td>
-                        <td class="muted"><?= e((string) ($log['denial_reason'] ?? '—')) ?></td>
-                    </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
-    <?php endif; ?>
+    <div class="card door-logs-card">
+        <?php if ($logs === []): ?>
+            <p class="door-admin-empty muted">Zatím žádné záznamy.</p>
+        <?php else: ?>
+            <div class="table-wrap door-admin-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Čas</th>
+                            <th>Kdo</th>
+                            <th>Výsledek</th>
+                            <th>Příkaz</th>
+                            <th>Poznámka</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($logs as $log): ?>
+                        <?php
+                        $authOk = ($log['authorization_result'] ?? '') === 'granted';
+                        $cmd = (string) ($log['command_result'] ?? 'not_sent');
+                        $cmdClass = match ($cmd) {
+                            'accepted' => 'badge-ok',
+                            'failed', 'timeout', 'conflict' => 'badge-bad',
+                            default => 'badge-muted',
+                        };
+                        $cmdLabel = match ($cmd) {
+                            'accepted' => 'Přijat',
+                            'failed' => 'Selhal',
+                            'timeout' => 'Timeout',
+                            'conflict' => 'Konflikt',
+                            'not_sent' => 'Neodeslán',
+                            default => $cmd,
+                        };
+                        $who = trim((string) (($log['first_name'] ?? '') . ' ' . ($log['last_name'] ?? '')));
+                        if ($who === '') {
+                            $who = (string) ($log['username'] ?? '—');
+                        }
+                        $reasonKey = (string) ($log['denial_reason'] ?? '');
+                        $reason = $reasonLabels[$reasonKey] ?? ($reasonKey !== '' ? $reasonKey : '—');
+                        ?>
+                        <tr>
+                            <td><?= e(format_datetime((string) ($log['created_at'] ?? ''))) ?></td>
+                            <td><?= e($who) ?></td>
+                            <td><span class="badge <?= $authOk ? 'badge-ok' : 'badge-bad' ?>"><?= $authOk ? 'Povoleno' : 'Zamítnuto' ?></span></td>
+                            <td><span class="badge <?= e($cmdClass) ?>"><?= e($cmdLabel) ?></span></td>
+                            <td class="muted"><?= e($reason) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </div>
 </section>

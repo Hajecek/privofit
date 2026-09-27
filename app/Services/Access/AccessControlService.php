@@ -108,16 +108,9 @@ final class AccessControlService
             throw new HttpException(429, 'Příliš mnoho pokusů o otevření. Počkejte chvíli.');
         }
 
-        $lockUntil = Clock::nowUtc()->modify('+8 seconds')->format('Y-m-d H:i:s');
-        $locked = $this->db->fetch('SELECT * FROM door_command_locks WHERE door_id = :id FOR UPDATE', ['id' => (int) $door['id']]);
-        if ($locked && $locked['locked_until'] > Clock::utc()) {
+        if (!$this->claimDoor($door)) {
             $this->log($user, $reservation, $door, 'denied', 'conflict', 'door_busy', $ip);
             throw new HttpException(409, 'Dveře právě zpracovávají jiný příkaz.');
-        }
-        if ($locked) {
-            $this->db->update('door_command_locks', ['locked_until' => $lockUntil], 'door_id = :id', ['id' => (int) $door['id']]);
-        } else {
-            $this->db->insert('door_command_locks', ['door_id' => (int) $door['id'], 'locked_until' => $lockUntil]);
         }
 
         $result = $this->provider->open($door);
@@ -189,6 +182,150 @@ final class AccessControlService
             'battery_critical' => $status->batteryCritical,
             'mode' => $status->mode,
         ];
+    }
+
+    /** @return array{test_mode:bool,doors:list<array<string,mixed>>} */
+    public function liveDoors(): array
+    {
+        $rows = $this->db->fetchAll('SELECT * FROM doors ORDER BY id ASC');
+        $doors = [];
+        foreach ($rows as $door) {
+            $doors[] = $this->refreshDoor($door);
+        }
+
+        return [
+            'test_mode' => $this->provider->name() === 'mock',
+            'doors' => $doors,
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    public function liveDoor(int $doorId): array
+    {
+        $door = $this->db->fetch('SELECT * FROM doors WHERE id = :id LIMIT 1', ['id' => $doorId]);
+        if (!$door) {
+            throw new HttpException(404, 'Dveře nebyly nalezeny.');
+        }
+
+        return $this->refreshDoor($door);
+    }
+
+    public function adminSet(array $admin, int $doorId, bool $open, string $ip): array
+    {
+        $door = $this->db->fetch('SELECT * FROM doors WHERE id = :id LIMIT 1', ['id' => $doorId]);
+        if (!$door || empty($door['is_active'])) {
+            throw new HttpException(404, 'Tyhle dveře teď nejdou ovládat.');
+        }
+
+        $limit = (array) config('security.rate_limits.access_open', ['limit' => 8, 'minutes' => 5]);
+        if (!$this->limiter->attempt('access-admin', (string) $admin['id'] . ':' . $door['id'], max(12, (int) $limit['limit']), (int) $limit['minutes'])) {
+            $this->log($admin, null, $door, 'denied', 'not_sent', 'rate_limited', $ip);
+            throw new HttpException(429, 'Příliš mnoho příkazů. Počkejte chvíli.');
+        }
+
+        if (!$this->claimDoor($door)) {
+            $this->log($admin, null, $door, 'denied', 'conflict', 'door_busy', $ip);
+            throw new HttpException(409, 'Dveře právě zpracovávají jiný příkaz.');
+        }
+
+        try {
+            $result = $open ? $this->provider->unlock($door) : $this->provider->close($door);
+            $this->db->update('doors', [
+                'last_known_state' => $result->lockState,
+                'last_known_door_state' => $result->doorState,
+                'last_checked_at' => Clock::utc(),
+            ], 'id = :id', ['id' => (int) $door['id']]);
+
+            $reason = $open ? 'admin_open' : 'admin_close';
+            $this->log(
+                $admin,
+                null,
+                $door,
+                $result->accepted ? 'granted' : 'denied',
+                $result->status,
+                $result->accepted ? $reason : ($result->errorCode ?: $reason),
+                $ip,
+                $result->lockState,
+                $result->doorState
+            );
+
+            if (!$result->accepted) {
+                throw new HttpException(502, $result->message !== '' ? $result->message : 'Příkaz se nepodařilo odeslat.');
+            }
+
+            return [
+                'accepted' => true,
+                'message' => $open ? 'Dveře byly otevřeny.' : 'Dveře byly zavřeny.',
+            ];
+        } finally {
+            $this->releaseDoor($door);
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private function refreshDoor(array $door): array
+    {
+        $active = !empty($door['is_active']);
+        $lock = strtolower((string) ($door['last_known_state'] ?? ''));
+        $sensor = strtolower((string) ($door['last_known_door_state'] ?? ''));
+        $battery = isset($door['last_battery_percent']) && $door['last_battery_percent'] !== null && $door['last_battery_percent'] !== ''
+            ? (int) $door['last_battery_percent']
+            : null;
+        $critical = !empty($door['battery_critical']);
+        $online = !empty($door['last_online_at']);
+
+        if ($active) {
+            $status = $this->provider->status($door);
+            $this->db->update('doors', [
+                'last_known_state' => $status->lockState,
+                'last_known_door_state' => $status->doorState,
+                'last_battery_percent' => $status->batteryPercent,
+                'battery_critical' => $status->batteryCritical ? 1 : 0,
+                'last_online_at' => $status->online ? Clock::utc() : $door['last_online_at'],
+                'last_checked_at' => Clock::utc(),
+            ], 'id = :id', ['id' => (int) $door['id']]);
+            $lock = strtolower((string) ($status->lockState ?? ''));
+            $sensor = strtolower((string) ($status->doorState ?? ''));
+            $battery = $status->batteryPercent;
+            $critical = $status->batteryCritical;
+            $online = $status->online;
+        }
+
+        $openLocks = ['unlocked', 'unlatched', 'unlocking', 'unlatching', 'unlocked_lock_n_go', 'odkleceno'];
+        $closedLocks = ['locked', 'locking', 'zakleceno'];
+        $open = in_array($lock, $openLocks, true) || in_array($sensor, ['opened', 'open'], true);
+        $closed = !$open && (in_array($lock, $closedLocks, true) || in_array($sensor, ['closed', 'deactivated'], true));
+
+        return [
+            'id' => (int) $door['id'],
+            'active' => $active,
+            'open' => $open,
+            'known' => $open || $closed,
+            'online' => $online,
+            'battery' => $battery,
+            'battery_low' => $critical || ($battery !== null && $battery <= 15),
+        ];
+    }
+
+    private function claimDoor(array $door): bool
+    {
+        $lockUntil = Clock::nowUtc()->modify('+8 seconds')->format('Y-m-d H:i:s');
+        $locked = $this->db->fetch('SELECT * FROM door_command_locks WHERE door_id = :id FOR UPDATE', ['id' => (int) $door['id']]);
+        if ($locked && $locked['locked_until'] > Clock::utc()) {
+            return false;
+        }
+        if ($locked) {
+            $this->db->update('door_command_locks', ['locked_until' => $lockUntil], 'door_id = :id', ['id' => (int) $door['id']]);
+        } else {
+            $this->db->insert('door_command_locks', ['door_id' => (int) $door['id'], 'locked_until' => $lockUntil]);
+        }
+
+        return true;
+    }
+
+    private function releaseDoor(array $door): void
+    {
+        $this->db->query('DELETE FROM door_command_locks WHERE door_id = :id', ['id' => (int) $door['id']]);
     }
 
     /** @return list<string> */

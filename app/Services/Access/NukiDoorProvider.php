@@ -35,17 +35,36 @@ final class NukiDoorProvider implements DoorProviderInterface
 
     public function open(array $door): DoorCommandResult
     {
-        if ($this->token === '' || empty($door['external_id'])) {
-            return new DoorCommandResult(false, 'failed', null, null, 'not_configured', 'Nuki API není nakonfigurováno.');
-        }
-
-        $smartlockId = rawurlencode((string) $door['external_id']);
+        $smartlockId = rawurlencode((string) ($door['external_id'] ?? ''));
         $endpoint = match ($this->action) {
             'unlock' => "/smartlock/{$smartlockId}/action/unlock",
             'lock' => "/smartlock/{$smartlockId}/action/lock",
             default => "/smartlock/{$smartlockId}/action",
         };
         $body = $this->action === 'unlatch' ? json_encode(['action' => 3]) : '{}';
+
+        return $this->dispatch($door, $endpoint, $body, true);
+    }
+
+    public function unlock(array $door): DoorCommandResult
+    {
+        $smartlockId = rawurlencode((string) ($door['external_id'] ?? ''));
+
+        return $this->dispatch($door, "/smartlock/{$smartlockId}/action/unlock", '{}', true);
+    }
+
+    public function close(array $door): DoorCommandResult
+    {
+        $smartlockId = rawurlencode((string) ($door['external_id'] ?? ''));
+
+        return $this->dispatch($door, "/smartlock/{$smartlockId}/action/lock", '{}', false);
+    }
+
+    private function dispatch(array $door, string $endpoint, string $body, bool $opening): DoorCommandResult
+    {
+        if ($this->token === '' || empty($door['external_id'])) {
+            return new DoorCommandResult(false, 'failed', null, null, 'not_configured', 'Nuki API není nakonfigurováno.');
+        }
 
         $response = $this->request('POST', $endpoint, $body);
         if ($response['error'] !== null) {
@@ -54,7 +73,8 @@ final class NukiDoorProvider implements DoorProviderInterface
 
         $accepted = in_array($response['statusCode'], [200, 204], true);
         $statusAfter = $this->status($door);
-        $physicallyOpen = $accepted && in_array($statusAfter->lockState, ['unlocked', 'unlatched', 'unlatching', 'unlocking'], true);
+        $openStates = ['unlocked', 'unlatched', 'unlatching', 'unlocking', 'unlocked_lock_n_go'];
+        $physicallyOpen = $opening && $accepted && in_array($statusAfter->lockState, $openStates, true);
 
         return new DoorCommandResult(
             accepted: $accepted,
@@ -63,7 +83,9 @@ final class NukiDoorProvider implements DoorProviderInterface
             doorState: $statusAfter->doorState,
             errorCode: $accepted ? null : 'http_' . $response['statusCode'],
             message: $accepted
-                ? 'Příkaz byl přijat Nuki API. Fyzické otevření je potvrzené pouze pokud to stav zámku dovolí.'
+                ? ($opening
+                    ? 'Příkaz k otevření byl přijat. Fyzické otevření je potvrzené jen podle stavu zámku.'
+                    : 'Příkaz k zavření byl přijat. Fyzické zavření je potvrzené jen podle stavu zámku.')
                 : 'Nuki API příkaz odmítlo.',
             physicalOpenConfirmed: $physicallyOpen,
         );

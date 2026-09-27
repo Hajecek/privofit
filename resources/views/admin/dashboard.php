@@ -4,16 +4,26 @@ $chart = is_array($chart ?? null) ? $chart : ['days' => [], 'breakdown' => [], '
 $current = is_array($stats['current'] ?? null) ? $stats['current'] : [];
 $door = is_array($stats['door'] ?? null) ? $stats['door'] : [];
 $todayList = is_array($stats['today_list'] ?? null) ? $stats['today_list'] : [];
-$deniedList = is_array($stats['denied_list'] ?? null) ? $stats['denied_list'] : [];
+$notices = is_array($stats['notices'] ?? null) ? $stats['notices'] : [];
 $next = is_array($stats['next'] ?? null) ? $stats['next'] : null;
 $occupied = !empty($current['occupied']);
 $reservation = is_array($current['reservation'] ?? null) ? $current['reservation'] : null;
 $online = !empty($door['online']);
 $configured = !empty($door['configured']);
 $testMode = !empty($door['test_mode']);
+$doorLock = strtolower((string) ($door['lock_state'] ?? ''));
+$doorSensor = strtolower((string) ($door['door_state'] ?? ''));
+$doorOpen = $configured && (
+    in_array($doorLock, ['unlocked', 'unlatched', 'unlocking', 'unlatching', 'unlocked_lock_n_go', 'odkleceno'], true)
+    || in_array($doorSensor, ['opened', 'open'], true)
+);
+$doorBattery = isset($door['battery_percent']) && $door['battery_percent'] !== null && $door['battery_percent'] !== ''
+    ? max(0, min(100, (int) $door['battery_percent']))
+    : null;
+$doorBatteryLow = !empty($door['battery_critical']) || ($doorBattery !== null && $doorBattery <= 15);
 $nowLocal = \App\Support\Clock::nowLocal();
 $chartJson = json_encode($chart, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP) ?: '{}';
-$breakdown = is_array($chart['breakdown'] ?? null) ? $chart['breakdown'] : [];
+$segments = is_array($chart['segments'] ?? null) ? $chart['segments'] : [];
 $dayNames = [1 => 'pondělí', 2 => 'úterý', 3 => 'středa', 4 => 'čtvrtek', 5 => 'pátek', 6 => 'sobota', 7 => 'neděle'];
 $todayLabel = ($dayNames[(int) $nowLocal->format('N')] ?? '') . ' ' . $nowLocal->format('j. n. Y');
 
@@ -45,6 +55,8 @@ if ($next && !empty($next['starts_at'])) {
 
 $statusText = $occupied ? 'Obsazeno' : 'Volno';
 $statusClass = $occupied ? 'is-busy' : 'is-free';
+
+$notifyCount = count($notices) + (($configured && !$online) ? 1 : 0) + ($doorBatteryLow ? 1 : 0);
 ?>
 <div class="adash">
     <header class="adash-hero">
@@ -53,11 +65,90 @@ $statusClass = $occupied ? 'is-busy' : 'is-free';
             <h1>Přehled</h1>
             <p class="muted"><?= e($todayLabel) ?> · <?= e($nowLocal->format('H:i')) ?></p>
         </div>
-        <div class="adash-live <?= e($statusClass) ?>">
-            <span class="adash-live-pulse" aria-hidden="true"></span>
-            <div>
-                <strong><?= e($statusText) ?></strong>
-                <span><?= $occupied ? e($guestName !== '' ? $guestName . ($slotLabel !== '' ? ' · ' . $slotLabel : '') : 'Aktivní rezervace') : ($nextLabel !== '' ? 'Další: ' . e($nextLabel) : 'Žádný další termín') ?></span>
+        <div class="adash-hero-tools">
+            <a class="adash-chip<?= $doorBatteryLow ? ' is-low' : '' ?>" href="<?= e(url('/user/sprava/vstup')) ?>" data-hero-battery>
+                <span class="door-bat<?= $doorBatteryLow ? ' is-low' : '' ?>" data-dash-bat aria-hidden="true"><span class="door-bat-fill" data-dash-fill style="width: <?= $doorBattery ?? 0 ?>%"></span></span>
+                <span class="adash-chip-copy">
+                    <strong data-dash-battery><?= $doorBattery === null ? '—' : e((string) $doorBattery) . '%' ?></strong>
+                    <span>Baterie</span>
+                </span>
+            </a>
+            <a class="adash-chip<?= !$configured ? '' : ($doorOpen ? ' is-open' : ' is-closed') ?>" href="<?= e(url('/user/sprava/vstup')) ?>" data-hero-door>
+                <span class="adash-chip-dot" aria-hidden="true"></span>
+                <span class="adash-chip-copy">
+                    <strong data-hero-door-state><?= !$configured ? 'Neznámý' : ($doorOpen ? 'Otevřeno' : 'Zavřeno') ?></strong>
+                    <span>Zámek</span>
+                </span>
+            </a>
+            <div class="adash-hero-status">
+            <div class="adash-live <?= e($statusClass) ?>">
+                <span class="adash-live-pulse" aria-hidden="true"></span>
+                <div>
+                    <strong><?= e($statusText) ?></strong>
+                    <span><?= $occupied ? e($guestName !== '' ? $guestName . ($slotLabel !== '' ? ' · ' . $slotLabel : '') : 'Aktivní rezervace') : ($nextLabel !== '' ? 'Další: ' . e($nextLabel) : 'Žádný další termín') ?></span>
+                </div>
+            </div>
+            <div class="adash-notify-wrap">
+                <button type="button" class="adash-bell" data-notify-open aria-expanded="false" aria-controls="adash-notify" aria-label="Upozornění">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 9a6 6 0 1 1 12 0c0 7 3 7 3 9H3c0-2 3-2 3-9Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
+                    <span class="adash-bell-count" data-notify-count <?= $notifyCount === 0 ? 'hidden' : '' ?>><?= (int) $notifyCount ?></span>
+                </button>
+                <div class="adash-notify" id="adash-notify" data-notify hidden>
+                    <div class="adash-notify-head">
+                        <h2>Upozornění</h2>
+                        <span class="muted">Posledních 7 dní</span>
+                    </div>
+                    <ul class="adash-notes">
+                        <li class="adash-note is-bad is-unread" data-notify-id="door-offline" data-notify-offline <?= $configured && !$online ? '' : 'hidden' ?>>
+                            <button type="button" class="adash-note-seen" data-notify-seen aria-pressed="false" aria-label="Označit jako viděné"></button>
+                            <a class="adash-note-link" href="<?= e(url('/user/sprava/vstup')) ?>">
+                                <span class="adash-note-mark is-door" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 8.5c2.8-2.2 6.2-3.5 10-3.5s7.2 1.3 10 3.5"/><path d="M5 12c2-1.6 4.4-2.4 7-2.4s5 .8 7 2.4"/><path d="M8.5 15.5c1-.7 2.2-1.1 3.5-1.1s2.5.4 3.5 1.1"/><path d="M12 19h.01"/></svg></span>
+                                <span class="adash-note-body">
+                                    <span class="adash-note-top"><strong>Zámek je offline</strong><span class="adash-note-meta"><span class="adash-note-kind is-door">Dveře</span><time>Teď</time></span></span>
+                                    <span class="adash-note-text">Spojení se zámkem teď neodpovídá.</span>
+                                </span>
+                                <span class="adash-note-go" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 6l6 6-6 6"/></svg></span>
+                            </a>
+                        </li>
+                        <li class="adash-note is-bad is-unread" data-notify-id="door-battery" data-notify-battery <?= $doorBatteryLow ? '' : 'hidden' ?>>
+                            <button type="button" class="adash-note-seen" data-notify-seen aria-pressed="false" aria-label="Označit jako viděné"></button>
+                            <a class="adash-note-link" href="<?= e(url('/user/sprava/vstup')) ?>">
+                                <span class="adash-note-mark is-door" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="7" width="16" height="10" rx="2"/><path d="M21 10v4"/><path d="M7 12h4"/></svg></span>
+                                <span class="adash-note-body">
+                                    <span class="adash-note-top"><strong>Baterie dochází</strong><span class="adash-note-meta"><span class="adash-note-kind is-door">Dveře</span><time>Teď</time></span></span>
+                                    <span class="adash-note-text" data-notify-battery-meta><?= $doorBattery === null ? 'Nabití je kritické.' : 'Zbývá ' . (int) $doorBattery . ' %.' ?></span>
+                                </span>
+                                <span class="adash-note-go" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 6l6 6-6 6"/></svg></span>
+                            </a>
+                        </li>
+                        <?php foreach ($notices as $note): ?>
+                            <li class="adash-note is-unread<?= ($note['tone'] ?? '') !== '' ? ' is-' . e((string) $note['tone']) : '' ?>" data-notify-id="<?= e((string) ($note['key'] ?? '')) ?>">
+                                <button type="button" class="adash-note-seen" data-notify-seen aria-pressed="false" aria-label="Označit jako viděné"></button>
+                                <?php $noteHref = (string) ($note['href'] ?? ''); ?>
+                                <?php if ($noteHref !== ''): ?><a class="adash-note-link" href="<?= e($noteHref) ?>"><?php else: ?><div class="adash-note-link"><?php endif; ?>
+                                    <?php if (!empty($note['avatar'])): ?>
+                                        <img class="adash-note-avatar" src="<?= e((string) $note['avatar']) ?>" alt="">
+                                    <?php else: ?>
+                                        <span class="adash-note-mark" aria-hidden="true"><?= e((string) ($note['initials'] ?? 'P')) ?></span>
+                                    <?php endif; ?>
+                                    <span class="adash-note-body">
+                                        <span class="adash-note-top">
+                                            <strong><?= e((string) ($note['title'] ?? '')) ?></strong>
+                                            <span class="adash-note-meta">
+                                                <span class="adash-note-kind <?= e((string) ($note['kind_class'] ?? '')) ?>"><?= e((string) ($note['kind'] ?? '')) ?></span>
+                                                <time><?= e((string) ($note['when'] ?? '')) ?></time>
+                                            </span>
+                                        </span>
+                                        <span class="adash-note-text"><?= e((string) ($note['text'] ?? '')) ?></span>
+                                    </span>
+                                    <?php if ($noteHref !== ''): ?><span class="adash-note-go" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 6l6 6-6 6"/></svg></span><?php endif; ?>
+                                <?php if ($noteHref !== ''): ?></a><?php else: ?></div><?php endif; ?>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
+                    <p class="adash-empty" data-notify-empty <?= $notifyCount === 0 ? '' : 'hidden' ?>>Žádná upozornění.</p>
+                </div>
+            </div>
             </div>
         </div>
     </header>
@@ -73,7 +164,13 @@ $statusClass = $occupied ? 'is-busy' : 'is-free';
             <div>
                 <p class="eyebrow">PŘÍJEM</p>
                 <h2><?= e(money_format_czk($chart['total'] ?? $stats['revenue'] ?? 0)) ?></h2>
-                <p class="muted">Posledních 30 dní · klikni na den v grafu</p>
+                <p
+                    class="muted"
+                    data-chart-hint
+                    data-hint-line="Posledních 30 dní · klikni na den"
+                    data-hint-area="Plochy podle tarifu · klikni na den"
+                    data-hint-bar="Sloupce podle tarifu · klikni na den"
+                >Posledních 30 dní · klikni na den</p>
             </div>
             <div class="adash-chart-actions">
                 <a class="btn btn-secondary" href="<?= e(url('/user/sprava/trzby?obdobi=dnes')) ?>">Dnes</a>
@@ -81,6 +178,24 @@ $statusClass = $occupied ? 'is-busy' : 'is-free';
             </div>
         </div>
 
+        <div class="chart-toolbar">
+        <ul class="chart-split-legend" data-chart-legend hidden>
+            <?php foreach ($segments as $segment): ?>
+                <?php
+                $segmentColor = (string) ($segment['color'] ?? '');
+                if (!preg_match('/^#[0-9a-fA-F]{6}$/', $segmentColor)) {
+                    $segmentColor = '#9aa49c';
+                }
+                ?>
+                <li><i style="background:<?= e($segmentColor) ?>"></i><?= e((string) ($segment['label'] ?? '')) ?></li>
+            <?php endforeach; ?>
+        </ul>
+            <div class="chart-kind" role="tablist" aria-label="Typ grafu">
+                <button type="button" class="chart-kind-btn is-on" role="tab" data-chart-kind="line" aria-selected="true">Čára</button>
+                <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="area" aria-selected="false">Plocha</button>
+                <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="bar" aria-selected="false">Sloupce</button>
+            </div>
+        </div>
         <div class="adash-chart-stage">
             <canvas data-dash-line width="800" height="260" aria-label="Vývoj tržeb"></canvas>
             <div class="adash-chart-tip" data-chart-tip hidden></div>
@@ -90,9 +205,15 @@ $statusClass = $occupied ? 'is-busy' : 'is-free';
             <div class="adash-donut-wrap">
                 <canvas data-dash-donut width="120" height="120" aria-hidden="true"></canvas>
                 <ul class="adash-legend">
-                    <li><i style="background:#c6f21a"></i>Rezervace <strong><?= e(money_format_czk($breakdown['reservations'] ?? 0)) ?></strong></li>
-                    <li><i style="background:#6ec8ff"></i>Členství <strong><?= e(money_format_czk($breakdown['memberships'] ?? 0)) ?></strong></li>
-                    <li><i style="background:#9aa49c"></i>Ostatní <strong><?= e(money_format_czk($breakdown['other'] ?? 0)) ?></strong></li>
+                    <?php foreach ($segments as $segment): ?>
+                        <?php
+                        $segmentColor = (string) ($segment['color'] ?? '');
+                        if (!preg_match('/^#[0-9a-fA-F]{6}$/', $segmentColor)) {
+                            $segmentColor = '#9aa49c';
+                        }
+                        ?>
+                        <li><i style="background:<?= e($segmentColor) ?>"></i><span><?= e((string) ($segment['label'] ?? '')) ?></span> <strong><?= e(money_format_czk($segment['amount'] ?? 0)) ?></strong></li>
+                    <?php endforeach; ?>
                 </ul>
             </div>
             <div class="adash-mini-kpis">
@@ -209,74 +330,37 @@ $statusClass = $occupied ? 'is-busy' : 'is-free';
         </section>
 
         <div class="adash-side">
-            <section class="adash-panel">
-                <div class="adash-panel-head">
+            <section class="door-panel dash-door<?= $doorOpen ? ' is-open' : ' is-closed' ?>" data-dash-door>
+                <div class="dash-door-top">
                     <div>
-                        <p class="eyebrow">DVEŘE</p>
-                        <h2>Zámek</h2>
+                        <p class="eyebrow"><?= e(strtoupper((string) ($door['provider'] ?? 'ZÁMEK'))) ?></p>
+                        <h2>Dveře</h2>
                     </div>
-                    <?php if ($configured): ?>
-                        <span class="badge <?= $online ? 'badge-ok' : 'badge-bad' ?>"><?= $online ? 'Online' : 'Offline' ?></span>
-                    <?php else: ?>
-                        <span class="badge badge-warn">Není nastaveno</span>
-                    <?php endif; ?>
+                    <p class="dash-door-state" data-dash-door-state><?= !$configured ? 'Neznámý stav' : ($doorOpen ? 'Otevřeno' : 'Zavřeno') ?></p>
                 </div>
-                <dl class="adash-meta">
-                    <div>
-                        <dt>Provider</dt>
-                        <dd><?= e(strtoupper((string) ($door['provider'] ?? 'n/a'))) ?></dd>
-                    </div>
-                    <div>
-                        <dt>Režim</dt>
-                        <dd><?= $testMode ? 'Test' : 'Produkce' ?></dd>
-                    </div>
-                    <div>
-                        <dt>Stav</dt>
-                        <dd><?= e((string) ($door['lock_state'] ?? '—')) ?></dd>
-                    </div>
-                    <div>
-                        <dt>Baterie</dt>
-                        <dd><?= isset($door['battery_percent']) && $door['battery_percent'] !== null && $door['battery_percent'] !== '' ? e((string) $door['battery_percent']) . '%' : '—' ?></dd>
-                    </div>
-                </dl>
-                <a class="btn btn-secondary adash-panel-btn" href="<?= e(url('/user/sprava/vstup')) ?>">Správa dveří</a>
+                <div class="door-stats dash-door-stats">
+                    <article class="door-stat<?= $configured && $online ? ' is-on' : ' is-off' ?>" data-dash-online>
+                        <span class="door-stat-k">Spojení</span>
+                        <strong><i class="door-dot" aria-hidden="true"></i><span data-dash-online-label><?= $configured && $online ? 'Online' : 'Offline' ?></span></strong>
+                        <span class="door-stat-sub" data-dash-online-sub><?= $configured && $online ? 'Zámek odpovídá' : 'Zámek teď neodpovídá' ?></span>
+                    </article>
+                    <article class="door-stat<?= $doorBatteryLow ? ' is-low' : '' ?>" data-dash-battery-stat>
+                        <span class="door-stat-k">Baterie</span>
+                        <strong>
+                            <span class="door-bat<?= $doorBatteryLow ? ' is-low' : '' ?>" data-dash-bat aria-hidden="true"><span class="door-bat-fill" data-dash-fill style="width: <?= $doorBattery ?? 0 ?>%"></span></span>
+                            <span data-dash-battery><?= $doorBattery === null ? '—' : e((string) $doorBattery) . '%' ?></span>
+                        </strong>
+                        <span class="door-stat-sub" data-dash-battery-sub><?= $doorBattery === null ? 'Stav není známý' : ($doorBatteryLow ? 'Dochází, vyměň článek' : 'Nabití je v pořádku') ?></span>
+                    </article>
+                    <article class="door-stat door-stat-mode<?= $testMode ? ' is-test' : ' is-live' ?>" data-dash-mode>
+                        <span class="door-stat-k">Režim</span>
+                        <strong data-dash-mode-label><?= $testMode ? 'Test' : 'Ostrý' ?></strong>
+                        <span class="door-stat-sub" data-dash-mode-sub><?= $testMode ? 'Fyzické dveře se nepohnou' : 'Příkaz jde rovnou na zámek' ?></span>
+                    </article>
+                </div>
+                <a class="btn btn-secondary adash-panel-btn" href="<?= e(url('/user/sprava/vstup')) ?>">Ovládat dveře</a>
             </section>
 
-            <section class="adash-panel">
-                <div class="adash-panel-head">
-                    <div>
-                        <p class="eyebrow">UPOZORNĚNÍ</p>
-                        <h2>Dnes</h2>
-                    </div>
-                    <span class="badge <?= count($deniedList) > 0 ? 'badge-bad' : 'badge-ok' ?>"><?= count($deniedList) ?></span>
-                </div>
-                <?php if ($deniedList === []): ?>
-                    <p class="adash-empty">Žádné zamítnuté vstupy.</p>
-                <?php else: ?>
-                    <ul class="adash-alerts">
-                        <?php foreach ($deniedList as $log): ?>
-                            <?php
-                            $who = trim((string) (($log['first_name'] ?? '') . ' ' . ($log['last_name'] ?? '')));
-                            if ($who === '') {
-                                $who = (string) ($log['username'] ?? 'Neznámý');
-                            }
-                            $when = \App\Support\Clock::toLocal((string) $log['created_at']);
-                            ?>
-                            <li>
-                                <div>
-                                    <?php if (!empty($log['public_id'])): ?>
-                                        <a href="<?= e(url('/user/sprava/zakaznici/' . $log['public_id'])) ?>"><?= e($who) ?></a>
-                                    <?php else: ?>
-                                        <strong><?= e($who) ?></strong>
-                                    <?php endif; ?>
-                                    <span><?= e((string) ($log['denial_reason'] ?: 'Zamítnuto')) ?></span>
-                                </div>
-                                <time><?= e($when->format('H:i')) ?></time>
-                            </li>
-                        <?php endforeach; ?>
-                    </ul>
-                <?php endif; ?>
-            </section>
         </div>
     </div>
 

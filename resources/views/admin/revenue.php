@@ -15,7 +15,7 @@ if ($toValue === '') {
 }
 $rangeOn = in_array($key, ['den', 'rozsah'], true);
 $chartJson = json_encode($chart, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP) ?: '{}';
-$breakdown = is_array($chart['breakdown'] ?? null) ? $chart['breakdown'] : [];
+$segments = is_array($chart['segments'] ?? null) ? $chart['segments'] : [];
 $showChart = count($chart['days'] ?? []) > 1;
 
 $tabs = [
@@ -127,14 +127,45 @@ $tabs = [
         <div>
             <p class="eyebrow">VÝVOJ</p>
             <h2>Příjem po dnech</h2>
-            <p class="muted">Najeti ukáže detail · klik otevře den</p>
+            <p
+                class="muted"
+                data-chart-hint
+                data-hint-line="Najetí ukáže součet · klik otevře den"
+                data-hint-area="Plochy podle tarifu · klik otevře den"
+                data-hint-bar="Sloupce podle tarifu · klik otevře den"
+            >Najetí ukáže součet · klik otevře den</p>
         </div>
         <div class="rev-chart-donut">
             <canvas data-rev-donut width="88" height="88" aria-hidden="true"></canvas>
             <ul class="adash-legend">
-                <li><i style="background:#c6f21a"></i>Rez. <strong><?= e(money_format_czk($breakdown['reservations'] ?? 0)) ?></strong></li>
-                <li><i style="background:#6ec8ff"></i>Člen. <strong><?= e(money_format_czk($breakdown['memberships'] ?? 0)) ?></strong></li>
+                <?php foreach ($segments as $segment): ?>
+                    <?php
+                    $segmentColor = (string) ($segment['color'] ?? '');
+                    if (!preg_match('/^#[0-9a-fA-F]{6}$/', $segmentColor)) {
+                        $segmentColor = '#9aa49c';
+                    }
+                    ?>
+                    <li><i style="background:<?= e($segmentColor) ?>"></i><span><?= e((string) ($segment['label'] ?? '')) ?></span> <strong><?= e(money_format_czk($segment['amount'] ?? 0)) ?></strong></li>
+                <?php endforeach; ?>
             </ul>
+        </div>
+    </div>
+    <div class="chart-toolbar">
+    <ul class="chart-split-legend" data-chart-legend hidden>
+        <?php foreach ($segments as $segment): ?>
+            <?php
+            $segmentColor = (string) ($segment['color'] ?? '');
+            if (!preg_match('/^#[0-9a-fA-F]{6}$/', $segmentColor)) {
+                $segmentColor = '#9aa49c';
+            }
+            ?>
+            <li><i style="background:<?= e($segmentColor) ?>"></i><?= e((string) ($segment['label'] ?? '')) ?></li>
+        <?php endforeach; ?>
+    </ul>
+        <div class="chart-kind" role="tablist" aria-label="Typ grafu">
+            <button type="button" class="chart-kind-btn is-on" role="tab" data-chart-kind="line" aria-selected="true">Čára</button>
+            <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="area" aria-selected="false">Plocha</button>
+            <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="bar" aria-selected="false">Sloupce</button>
         </div>
     </div>
     <div class="adash-chart-stage">
@@ -165,9 +196,6 @@ $tabs = [
                         <th>Zákazník</th>
                         <th>Typ</th>
                         <th>Částka</th>
-                        <th>Poskytovatel</th>
-                        <th>Platba</th>
-                        <th>Stav</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -199,13 +227,12 @@ $tabs = [
                             <?php endif; ?>
                         </td>
                         <td><span class="badge <?= e($typeClass) ?>"><?= e($type) ?></span></td>
-                        <td>
-                            <strong><?= e(money_format_czk($payment['amount'] ?? 0)) ?></strong>
-                            <?php if ((float) ($payment['fee_amount'] ?? 0) > 0): ?>
-                                <div class="muted">zákazník <?= e(number_format((float) ($payment['charged_amount'] ?? 0), 2, ',', ' ')) ?> Kč</div>
-                            <?php endif; ?>
+                        <td class="pay-facts">
+                            <div class="pay-price">
+                                <span><?= e(money_format_czk($payment['amount'] ?? 0)) ?></span>
+                                <?php $factsMode = 'stack'; include __DIR__ . '/_payment_facts.php'; ?>
+                            </div>
                         </td>
-                        <?php $factsMode = 'columns'; include __DIR__ . '/_payment_facts.php'; ?>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
@@ -213,3 +240,4 @@ $tabs = [
         </div>
     <?php endif; ?>
 </section>
+<?php require __DIR__ . '/_payment_modal.php'; ?>

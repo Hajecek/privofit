@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Controllers\Admin\AdminController;
 use App\Controllers\User\DashboardController;
+use App\Controllers\User\PayController;
 use App\Controllers\User\ProfileController;
 use App\Controllers\User\ReservationController;
 use App\Controllers\User\StudioController;
@@ -73,6 +74,9 @@ $router->get('/user/studio/doba', [StudioController::class, 'hoursPage'], [AuthM
 $router->post('/user/studio/doba', [StudioController::class, 'hours'], [AuthMiddleware::class, AdminMiddleware::class]);
 $router->post('/user/studio/vyjimka', [StudioController::class, 'exception'], [AuthMiddleware::class, AdminMiddleware::class]);
 $router->post('/user/studio/vyjimka/smazat', [StudioController::class, 'deleteException'], [AuthMiddleware::class, AdminMiddleware::class]);
+$router->get('/user/platba/navrat', [PayController::class, 'returned'], [AuthMiddleware::class]);
+$router->post('/user/platba/potvrdit', [PayController::class, 'confirm'], [AuthMiddleware::class]);
+$router->get('/user/platba/{id}', [PayController::class, 'show'], [AuthMiddleware::class]);
 $router->get('/user/clenstvi', [ProfileController::class, 'membership'], [AuthMiddleware::class]);
 $router->post('/user/clenstvi', [ProfileController::class, 'buyMembership'], [AuthMiddleware::class]);
 $router->get('/user/clenstvi/platba', [ProfileController::class, 'membershipPaid'], [AuthMiddleware::class]);
@@ -112,7 +116,8 @@ $router->post('/user/sprava/zakaznici/{id}/clenstvi/reset', [AdminController::cl
 $router->get('/user/sprava/tarify', [AdminController::class, 'plans'], $admin);
 $router->post('/user/sprava/tarify', [AdminController::class, 'savePlan'], $admin);
 $router->get('/user/sprava/vstup', [AdminController::class, 'access'], $admin);
-$router->post('/user/sprava/vstup/test', [AdminController::class, 'testOpen'], $admin);
+$router->get('/user/sprava/vstup/stav', [AdminController::class, 'doorLive'], $admin);
+$router->post('/user/sprava/vstup/stav', [AdminController::class, 'setDoor'], $admin);
 $router->get('/user/sprava/zajem', [AdminController::class, 'interest'], $admin);
 $router->get('/user/sprava/zajem/export', [AdminController::class, 'exportInterest'], $admin);
 $router->post('/user/sprava/zajem/{id}/smazat', [AdminController::class, 'deleteInterest'], $admin);
@@ -137,7 +142,8 @@ $router->post('/admin/zakaznici/{id}/clenstvi/reset', [AdminController::class, '
 $router->get('/admin/clenstvi', [AdminController::class, 'plans'], $admin);
 $router->post('/admin/clenstvi', [AdminController::class, 'savePlan'], $admin);
 $router->get('/admin/vstup', [AdminController::class, 'access'], $admin);
-$router->post('/admin/vstup/test', [AdminController::class, 'testOpen'], $admin);
+$router->get('/admin/vstup/stav', [AdminController::class, 'doorLive'], $admin);
+$router->post('/admin/vstup/stav', [AdminController::class, 'setDoor'], $admin);
 $router->get('/admin/zajem', [AdminController::class, 'interest'], $admin);
 $router->get('/admin/zajem/export', [AdminController::class, 'exportInterest'], $admin);
 $router->post('/admin/zajem/{id}/smazat', [AdminController::class, 'deleteInterest'], $admin);
