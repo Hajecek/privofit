@@ -14,7 +14,7 @@ $bodyClass = $bodyClass ?? '';
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="<?= e(asset('user/style.css')) ?>?v=140">
+    <link rel="stylesheet" href="<?= e(asset('user/style.css')) ?>?v=142">
     <link rel="manifest" href="<?= e(url('/manifest.json')) ?>">
     <link rel="icon" href="<?= e(url('/favicon.ico')) ?>?v=3" sizes="any">
     <link rel="icon" type="image/png" sizes="32x32" href="<?= e(asset('brand/favicon-32.png')) ?>?v=3">
@@ -29,7 +29,7 @@ $bodyClass = $bodyClass ?? '';
 <?= $content ?? '' ?>
 <script nonce="<?= e($cspNonce) ?>" src="<?= e(asset('js/app.js')) ?>?v=27"></script>
 <?php foreach (($pageScripts ?? []) as $src): ?>
-<script nonce="<?= e($cspNonce) ?>" src="<?= e(asset($src)) ?>?v=69"></script>
+<script nonce="<?= e($cspNonce) ?>" src="<?= e(asset($src)) ?>?v=73"></script>
 <?php endforeach; ?>
 <script nonce="<?= e($cspNonce) ?>">
 if ('serviceWorker' in navigator) {

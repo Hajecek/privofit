@@ -9,6 +9,7 @@
   const feeLabelEl = root.querySelector("[data-fee-label]");
   const chargeEl = root.querySelector("[data-charge]");
   const errorEl = root.querySelector("[data-error]");
+  const statusEl = root.querySelector("[data-status]");
   const button = root.querySelector("[data-submit]");
   const walletsEl = root.querySelector("[data-wallets]");
   const orEl = root.querySelector("[data-pay-or]");
@@ -25,6 +26,12 @@
     if (!errorEl) return;
     errorEl.hidden = !message;
     errorEl.textContent = message || "";
+  };
+
+  const showStatus = (message) => {
+    if (!statusEl) return;
+    statusEl.hidden = !message;
+    statusEl.textContent = message || "";
   };
 
   const elements = stripe.elements({
@@ -171,10 +178,23 @@
     await quoteReady;
     let data = await authorize();
     if (!data) return false;
-    if (!data.ready) {
+    if (!data.ready && options.keepAmount) {
       await useQuote(data);
       applyMode();
-      showError("Poplatek u téhle karty je jiný. Částka dole už sedí, potvrď platbu znovu.");
+      showStatus("Poplatek se srovnal s kartou. Potvrď platbu znovu.");
+      return false;
+    }
+    if (!data.ready) {
+      const name = String(data.label || "karta");
+      showStatus(name + " · účtuji " + crowns(data.charge) + ".");
+      await useQuote(data);
+      if (button) button.textContent = "Účtuji…";
+      data = await authorize();
+      if (!data) return false;
+    }
+    if (!data.ready) {
+      showStatus("");
+      showError("Částku se nepodařilo sladit s kartou. Zkus to znovu.");
       return false;
     }
     if (data.status === "requires_action" && data.clientSecret) {
@@ -207,6 +227,7 @@
     busy = true;
     if (button) button.disabled = true;
     showError("");
+    showStatus("");
     try {
       const paid = await completePayment({ keepAmount: true });
       if (!paid) failWallet(event);
@@ -224,13 +245,18 @@
     busy = true;
     button.disabled = true;
     showError("");
+    showStatus("");
     try {
       await completePayment();
     } catch (error) {
+      showStatus("");
       showError(error instanceof Error ? error.message : "Platbu se nepodařilo dokončit.");
     } finally {
       busy = false;
-      if (!leaving && button) button.disabled = false;
+      if (!leaving && button) {
+        button.disabled = false;
+        button.textContent = "Zaplatit kartou";
+      }
     }
   });
 })();

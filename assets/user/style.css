@@ -3646,6 +3646,17 @@ a.adash-note-link:hover .adash-note-go { color: var(--lime); }
   margin: 4px 0 0;
   font-size: clamp(1.6rem, 3vw, 2.1rem);
   color: var(--lime);
+  font-variant-numeric: tabular-nums;
+}
+.adash-chart-head h2.is-recount,
+.adash-mini-kpis strong.is-recount,
+.adash-legend strong.is-recount {
+  animation: adash-income-recount 0.78s ease;
+}
+@keyframes adash-income-recount {
+  0% { text-shadow: 0 0 0 transparent; }
+  28% { text-shadow: 0 0 16px #c6f21a99; }
+  100% { text-shadow: 0 0 0 transparent; }
 }
 .adash-chart-head .muted { margin-top: 6px; }
 .adash-chart-actions {
@@ -3816,6 +3827,7 @@ a.adash-note-link:hover .adash-note-go { color: var(--lime); }
   margin-left: auto;
   color: var(--fog);
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 .adash-mini-kpis {
   display: grid;
@@ -3849,6 +3861,7 @@ a.adash-note-link:hover .adash-note-go { color: var(--lime); }
   font-family: var(--display);
   font-size: 1.15rem;
   letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
 }
 
 .adash-kpis {
@@ -5443,7 +5456,10 @@ body.user-app:has(.profile-save.is-on) .app-main { padding-bottom: 140px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .page-rise,
-  .streak-bar-fill {
+  .streak-bar-fill,
+  .adash-chart-head h2.is-recount,
+  .adash-mini-kpis strong.is-recount,
+  .adash-legend strong.is-recount {
     animation: none;
   }
 }
@@ -5571,6 +5587,11 @@ body.user-app:has(.profile-save.is-on) .app-main { padding-bottom: 140px; }
 .pay-error {
   margin: 12px 0 0;
   color: #ff8b8b;
+}
+.pay-status {
+  margin: 12px 0 0;
+  color: var(--lime);
+  font-weight: 700;
 }
 .pay-wallets.is-ready {
   margin-bottom: 4px;

@@ -164,6 +164,7 @@ final class Seeder
             'reservation.buffer_minutes' => 15,
             'reservation.hold_minutes' => 40,
             'reservation.cancellation_hours' => 12,
+            'reservation.advance_days' => 56,
             'access.early_minutes' => 5,
             'access.late_minutes' => 5,
             'pricing.hourly' => 150,

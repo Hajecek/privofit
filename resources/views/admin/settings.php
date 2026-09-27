@@ -5,6 +5,7 @@ $min = (int) setting('reservation.min_minutes', 60);
 $max = (int) setting('reservation.max_minutes', 1440);
 $buffer = (int) setting('reservation.buffer_minutes', 15);
 $cancel = (int) setting('reservation.cancellation_hours', 12);
+$advance = max(1, min(365, (int) setting('reservation.advance_days', 56)));
 $early = (int) setting('access.early_minutes', 5);
 $late = (int) setting('access.late_minutes', 5);
 $blockMinutes = $min + $buffer;
@@ -78,6 +79,11 @@ $blockMinutes = $min + $buffer;
                 <label for="setting-buffer">Rezerva na převlečení (min)</label>
                 <input id="setting-buffer" name="reservation_buffer_minutes" inputmode="numeric" value="<?= e((string) $buffer) ?>">
                 <p class="muted">Patří do každého bloku. Víc bloků za sebou se drží celé, klidně na celý den.</p>
+            </div>
+            <div class="field">
+                <label for="setting-advance">Rezervace dopředu (dny)</label>
+                <input id="setting-advance" name="reservation_advance_days" inputmode="numeric" value="<?= e((string) $advance) ?>">
+                <p class="muted">Kolik dní dopředu jde v kalendáři vybrat termín. 56 je zhruba osm týdnů.</p>
             </div>
             <div class="field">
                 <label for="setting-cancel">Storno (hodiny)</label>

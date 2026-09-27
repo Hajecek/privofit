@@ -21,6 +21,7 @@ $payload = [
     'membership_covers' => !empty($membership_covers),
     'entries_remaining' => $entries_remaining,
     'stripeFee' => \App\Services\Billing\StripeFee::rates(),
+    'advanceDays' => max(1, min(365, (int) setting('reservation.advance_days', 56))),
 ];
 ?>
 <div class="page-head">

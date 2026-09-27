@@ -247,6 +247,11 @@ final class ReservationService
         if ($startUtc <= Clock::nowUtc()) {
             throw new HttpException(422, 'Nelze rezervovat termín v minulosti.');
         }
+        $advance = $this->advanceDays();
+        $latest = Clock::nowLocal()->setTime(0, 0)->modify('+' . $advance . ' days');
+        if ($startLocal->setTime(0, 0) > $latest) {
+            throw new HttpException(422, 'Tak daleko rezervovat nejde. Nejdál je to ' . $advance . ' dní dopředu.');
+        }
 
         $hours = $this->hoursForDate($room, $startLocal);
         if ($hours['closed']) {
@@ -1332,6 +1337,11 @@ final class ReservationService
     private function bufferMinutes(): int
     {
         return max(0, $this->settings->int('reservation.buffer_minutes', 15));
+    }
+
+    private function advanceDays(): int
+    {
+        return max(1, min(365, $this->settings->int('reservation.advance_days', 56)));
     }
 
     private function durationStep(): int

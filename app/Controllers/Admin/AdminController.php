@@ -1172,12 +1172,20 @@ final class AdminController extends Controller
             'reservation.max_minutes' => 1440,
             'reservation.buffer_minutes' => 15,
             'reservation.cancellation_hours' => 12,
+            'reservation.advance_days' => 56,
             'access.early_minutes' => 5,
             'access.late_minutes' => 5,
+        ];
+        $limits = [
+            'reservation.advance_days' => [1, 365],
         ];
         foreach ($keys as $key => $default) {
             $raw = $request->input($key, $request->input(str_replace('.', '_', $key), $default));
             $value = max(0, (int) $raw);
+            if (isset($limits[$key])) {
+                [$min, $max] = $limits[$key];
+                $value = max($min, min($max, $value));
+            }
             $this->app->settings()->set($key, (string) $value);
         }
         (new AuditService($this->app->db()))->log($this->app->auth()->id(), 'settings.update', 'app_settings', null, null, $request->all(), $request->ip());

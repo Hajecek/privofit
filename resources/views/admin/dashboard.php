@@ -164,7 +164,7 @@ $liveRev = (string) ($liveRev ?? '');
         <div class="adash-chart-head">
             <div>
                 <p class="eyebrow">PŘÍJEM</p>
-                <h2 data-chart-total><?= e(money_format_czk($chart['total'] ?? $stats['revenue'] ?? 0)) ?></h2>
+                <h2 data-chart-total data-count-to="<?= e(money_format_czk($chart['total'] ?? $stats['revenue'] ?? 0)) ?>">0 Kč</h2>
                 <p
                     class="muted"
                     data-chart-hint

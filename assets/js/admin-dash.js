@@ -131,8 +131,66 @@
   const kindClass = (value) => (/^is-[a-z]+$/.test(String(value || "")) ? String(value) : "");
   const toneClass = (value) => (value === "bad" || value === "warn" ? "is-" + value : "");
 
+  const parseMoney = (value) => {
+    const digits = String(value || "").replace(/[^\d-]/g, "");
+    return Number(digits) || 0;
+  };
+  const formatMoney = (value) => {
+    const n = Math.round(Number(value) || 0);
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0") + " Kč";
+  };
+  const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const moneyFrames = new WeakMap();
+  const countMoney = (node, nextText, duration = 780) => {
+    if (!node || nextText == null || nextText === "") return;
+    const label = String(nextText);
+    const to = parseMoney(label);
+    const from = parseMoney(node.textContent);
+    const pending = moneyFrames.get(node);
+    if (pending) cancelAnimationFrame(pending);
+    if (from === to || reducedMotion()) {
+      node.textContent = label;
+      node.classList.remove("is-recount");
+      return;
+    }
+    node.classList.remove("is-recount");
+    void node.offsetWidth;
+    node.classList.add("is-recount");
+    const start = performance.now();
+    const step = (now) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      if (t < 1) {
+        node.textContent = formatMoney(from + (to - from) * eased);
+        moneyFrames.set(node, requestAnimationFrame(step));
+        return;
+      }
+      node.textContent = label;
+      node.classList.remove("is-recount");
+      moneyFrames.delete(node);
+    };
+    moneyFrames.set(node, requestAnimationFrame(step));
+  };
+
+  const income = document.querySelector("[data-chart-total]");
+  if (income) {
+    const target = income.getAttribute("data-count-to") || income.textContent.trim();
+    if (!income.hasAttribute("data-count-to") && target && !reducedMotion() && parseMoney(target) > 0) {
+      income.textContent = formatMoney(0);
+    }
+    countMoney(income, target, 1100);
+  }
+
   const fillLegend = (list, segments, withAmount) => {
     if (!list) return;
+    const previous = new Map();
+    if (withAmount) {
+      list.querySelectorAll("li").forEach((item) => {
+        const name = item.querySelector("span")?.textContent || "";
+        const amount = item.querySelector("strong");
+        if (name && amount) previous.set(name, amount.textContent);
+      });
+    }
     list.replaceChildren();
     (Array.isArray(segments) ? segments : []).forEach((segment) => {
       const item = document.createElement("li");
@@ -143,8 +201,10 @@
         const label = document.createElement("span");
         label.textContent = String(segment.label || "");
         const amount = document.createElement("strong");
-        amount.textContent = String(segment.amount_label || "");
+        const next = String(segment.amount_label || "");
+        amount.textContent = previous.get(label.textContent) || formatMoney(0);
         item.append(label, document.createTextNode(" "), amount);
+        countMoney(amount, next);
       } else {
         item.append(document.createTextNode(String(segment.label || "")));
       }
@@ -301,6 +361,38 @@
     applyRead();
   };
 
+  let donutFrame = 0;
+  const morphDonut = (fromSegments, toSegments) => {
+    if (!Charts || !donut) {
+      donutSegments = toSegments;
+      return;
+    }
+    const token = ++donutFrame;
+    const from = new Map((fromSegments || []).map((segment) => [segment.key, Number(segment.amount) || 0]));
+    const snap = () => {
+      donutSegments = toSegments;
+      Charts.drawDonut(donut, donutBreakdown, donutSegments);
+    };
+    if (reducedMotion()) {
+      snap();
+      return;
+    }
+    const start = performance.now();
+    const step = (now) => {
+      if (token !== donutFrame) return;
+      const t = Math.min(1, (now - start) / 780);
+      const eased = 1 - Math.pow(1 - t, 3);
+      donutSegments = toSegments.map((segment) => ({
+        ...segment,
+        amount: (from.get(segment.key) || 0) + ((Number(segment.amount) || 0) - (from.get(segment.key) || 0)) * eased,
+      }));
+      Charts.drawDonut(donut, donutBreakdown, donutSegments);
+      if (t < 1) requestAnimationFrame(step);
+      else snap();
+    };
+    requestAnimationFrame(step);
+  };
+
   const applyLive = (data) => {
     if (!data || typeof data !== "object") return;
     const clock = document.querySelector("[data-dash-clock]");
@@ -327,9 +419,9 @@
     const today = document.querySelector("[data-rev-today]");
     const yesterday = document.querySelector("[data-rev-yesterday]");
     const count = document.querySelector("[data-rev-count]");
-    if (total && money.total) total.textContent = String(money.total);
-    if (today && money.today) today.textContent = String(money.today);
-    if (yesterday && money.yesterday) yesterday.textContent = String(money.yesterday);
+    countMoney(total, money.total);
+    countMoney(today, money.today);
+    countMoney(yesterday, money.yesterday);
     if (count) count.textContent = String(Number(money.count) || 0);
     const customers = document.querySelector("[data-link-customers]");
     const interest = document.querySelector("[data-link-interest]");
@@ -338,17 +430,18 @@
     const nextChart = JSON.stringify(data.chart || {});
     if (Charts && data.chart && nextChart !== chartKey) {
       chartKey = nextChart;
-      donutSegments = data.chart.segments || [];
+      const previousSegments = donutSegments;
+      const nextSegments = data.chart.segments || [];
       donutBreakdown = data.chart.breakdown || {};
       chartHandle?.update(data.chart.days || [], {
-        segments: donutSegments,
+        segments: nextSegments,
         tipEl: tip,
         onSelect: onSelectDay,
       });
-      if (donut) Charts.drawDonut(donut, donutBreakdown, donutSegments);
+      morphDonut(previousSegments, nextSegments);
       const legend = root?.querySelector("[data-chart-legend]");
-      fillLegend(legend, donutSegments, false);
-      fillLegend(document.querySelector("[data-chart-donut-legend]"), donutSegments, true);
+      fillLegend(legend, nextSegments, false);
+      fillLegend(document.querySelector("[data-chart-donut-legend]"), nextSegments, true);
       if (legend) {
         const kind = root?.querySelector("[data-chart-kind].is-on")?.getAttribute("data-chart-kind") || "line";
         legend.hidden = kind === "line" || legend.children.length === 0;

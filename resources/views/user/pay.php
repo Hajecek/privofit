@@ -75,6 +75,7 @@ $ready = str_starts_with($key, 'pk_');
             <p class="pay-or" data-pay-or hidden><span>nebo kartou</span></p>
             <div id="payment-element"></div>
             <p class="pay-error" data-error hidden></p>
+            <p class="pay-status" data-status hidden></p>
         </div>
         <footer class="pay-payoff">
             <div class="pay-due">

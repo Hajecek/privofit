@@ -640,13 +640,58 @@
     applyChrome();
     draw(opts.animate !== false);
     requestAnimationFrame(holdScroll);
+    let morphToken = 0;
+    const lerpDay = (from, to, t) => {
+      const mix = (a, b) => (Number(a) || 0) + ((Number(b) || 0) - (Number(a) || 0)) * t;
+      const fromParts = from && from.parts && typeof from.parts === "object" ? from.parts : {};
+      const toParts = to && to.parts && typeof to.parts === "object" ? to.parts : {};
+      const parts = {};
+      new Set([...Object.keys(fromParts), ...Object.keys(toParts)]).forEach((key) => {
+        parts[key] = mix(fromParts[key], toParts[key]);
+      });
+      return {
+        ...to,
+        amount: mix(from && from.amount, to && to.amount),
+        reservations: mix(from && from.reservations, to && to.reservations),
+        memberships: mix(from && from.memberships, to && to.memberships),
+        other: mix(from && from.other, to && to.other),
+        count: Math.round(mix(from && from.count, to && to.count)),
+        parts,
+      };
+    };
+
     return {
       setKind,
       update(nextDays, nextOpts = {}) {
-        days = Array.isArray(nextDays) ? nextDays : [];
+        const from = (Array.isArray(days) ? days : []).map((day) => ({
+          ...day,
+          parts: { ...(day.parts || {}) },
+        }));
+        const to = Array.isArray(nextDays) ? nextDays : [];
         opts = { ...opts, ...nextOpts, animate: false };
+        const token = ++morphToken;
+        if (reduceMotion() || from.length === 0 || from.length !== to.length) {
+          days = to;
+          applyChrome();
+          draw(false);
+          return;
+        }
+        days = from.map((day) => ({ ...day, parts: { ...(day.parts || {}) } }));
         applyChrome();
         draw(false);
+        const start = performance.now();
+        const step = (now) => {
+          if (token !== morphToken) return;
+          const t = Math.min(1, (now - start) / 780);
+          const eased = 1 - Math.pow(1 - t, 3);
+          const done = t >= 1;
+          to.forEach((day, index) => {
+            days[index] = done ? day : lerpDay(from[index], day, eased);
+          });
+          if (handle && handle.redraw) handle.redraw();
+          if (!done) requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
       },
     };
   };

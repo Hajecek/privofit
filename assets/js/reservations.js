@@ -121,7 +121,12 @@
     const date = parseDate(value);
     return DAYS[date.getDay()] + " " + date.getDate() + ". " + MONTHS_GEN[date.getMonth()];
   };
-  const maxBookable = () => addDays(state.today, 56);
+  const advanceDays = () => {
+    const days = Math.round(Number(payload.advanceDays));
+    if (!Number.isFinite(days)) return 56;
+    return Math.min(365, Math.max(1, days));
+  };
+  const maxBookable = () => addDays(state.today, advanceDays());
   const roomParam = () => {
     const id = root.getAttribute("data-room") || "";
     return id ? "&room=" + encodeURIComponent(id) : "";
