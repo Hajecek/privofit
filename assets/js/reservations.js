@@ -4,7 +4,9 @@
 
   const MONTHS = ["leden", "únor", "březen", "duben", "květen", "červen", "červenec", "srpen", "září", "říjen", "listopad", "prosinec"];
   const MONTHS_GEN = ["ledna", "února", "března", "dubna", "května", "června", "července", "srpna", "září", "října", "listopadu", "prosince"];
+  const MONTHS_SHORT = ["LED", "ÚNO", "BŘE", "DUB", "KVĚ", "ČVN", "ČVC", "SRP", "ZÁŘ", "ŘÍJ", "LIS", "PRO"];
   const DAYS = ["neděle", "pondělí", "úterý", "středa", "čtvrtek", "pátek", "sobota"];
+  const DOW_SHORT = ["NE", "PO", "ÚT", "ST", "ČT", "PÁ", "SO"];
 
   const payload = JSON.parse(root.getAttribute("data-payload") || "{}");
   const hoursEl = root.querySelector("[data-hour-list]");
@@ -16,6 +18,9 @@
   const loadingEl = root.querySelector("[data-hours-loading]");
   const hintEl = root.querySelector("[data-hours-hint]");
   const dateLabelEl = root.querySelector("[data-date-label]");
+  const sheetMonthEl = root.querySelector("[data-sheet-month]");
+  const sheetDayEl = root.querySelector("[data-sheet-day]");
+  const sheetDowEl = root.querySelector("[data-sheet-dow]");
   const form = root.querySelector("[data-book-form]");
   const startInput = form?.querySelector('[name="start"]');
   const durationInput = form?.querySelector('[name="duration"]');
@@ -29,6 +34,7 @@
   const guestCountEl = bar?.querySelector("[data-guest-count]");
   const calendar = root.querySelector("[data-calendar]");
   const calModal = root.querySelector("[data-cal-modal]");
+  if (calModal) document.body.appendChild(calModal);
   const openCalBtns = [...root.querySelectorAll("[data-open-cal]")];
   const openCalBtn = openCalBtns[0] || null;
   const calGrid = calendar?.querySelector("[data-cal-grid]");
@@ -323,7 +329,7 @@
         );
       }).join("");
     }
-    if (dateLabelEl) dateLabelEl.textContent = dateLabel(state.date);
+    paintSheet();
     if (hintEl) {
       if (closed) {
         hintEl.textContent = isToday ? "Dnes je zavřeno." : "Tento den je zavřeno.";
@@ -439,14 +445,26 @@
   };
 
   const isCalOpen = () => !!(calModal && !calModal.hidden);
+  let calOpener = openCalBtn;
+
+  const paintSheet = () => {
+    const date = parseDate(state.date);
+    if (sheetMonthEl) sheetMonthEl.textContent = MONTHS_SHORT[date.getMonth()];
+    if (sheetDayEl) sheetDayEl.textContent = String(date.getDate());
+    if (sheetDowEl) sheetDowEl.textContent = DOW_SHORT[date.getDay()];
+    if (dateLabelEl) dateLabelEl.textContent = dateLabel(state.date);
+  };
 
   const openCalendar = async () => {
     if (!calModal) return;
+    const selectedDate = parseDate(state.date);
+    state.calYear = selectedDate.getFullYear();
+    state.calMonth = selectedDate.getMonth() + 1;
     calModal.hidden = false;
     document.body.classList.add("cal-open");
-    if (openCalBtn) openCalBtn.setAttribute("aria-expanded", "true");
+    openCalBtns.forEach((btn) => btn.setAttribute("aria-expanded", "true"));
     await loadCalendar();
-    const selected = calGrid?.querySelector(".cal-day.is-selected:not(:disabled)") || calendar?.querySelector(".cal-modal-close");
+    const selected = calGrid?.querySelector(".cal-day.is-selected:not(:disabled)") || calendar?.querySelector(".cal-modal-x");
     selected?.focus();
   };
 
@@ -454,10 +472,8 @@
     if (!calModal || calModal.hidden) return;
     calModal.hidden = true;
     document.body.classList.remove("cal-open");
-    if (openCalBtn) {
-      openCalBtn.setAttribute("aria-expanded", "false");
-      openCalBtn.focus();
-    }
+    openCalBtns.forEach((btn) => btn.setAttribute("aria-expanded", "false"));
+    calOpener?.focus();
   };
 
   const loadCalendar = async () => {
@@ -481,6 +497,18 @@
 
   const renderCalendar = () => {
     if (calTitle) calTitle.textContent = MONTHS[state.calMonth - 1] + " " + state.calYear;
+    const todayDate = parseDate(state.today);
+    const maxDateObj = parseDate(maxBookable());
+    const prevBtn = calendar?.querySelector("[data-cal-prev]");
+    const nextBtn = calendar?.querySelector("[data-cal-next]");
+    if (prevBtn) {
+      prevBtn.disabled = state.calYear < todayDate.getFullYear()
+        || (state.calYear === todayDate.getFullYear() && state.calMonth <= todayDate.getMonth() + 1);
+    }
+    if (nextBtn) {
+      nextBtn.disabled = state.calYear > maxDateObj.getFullYear()
+        || (state.calYear === maxDateObj.getFullYear() && state.calMonth >= maxDateObj.getMonth() + 1);
+    }
     if (!calGrid) return;
     const first = new Date(state.calYear, state.calMonth - 1, 1);
     const startPad = (first.getDay() + 6) % 7;
@@ -506,8 +534,13 @@
         info.mine ? "is-mine" : "",
         disabled ? "is-disabled" : "",
       ].filter(Boolean).join(" ");
-      const label = info.mine ? day + ", tvoje rezervace" : String(day);
-      html += '<button type="button" class="' + classes + '" data-cal-day="' + value + '" aria-label="' + label + '"' + (disabled ? " disabled" : "") + ">" + day + "</button>";
+      const bits = [day + ". " + MONTHS_GEN[state.calMonth - 1]];
+      if (today) bits.push("dnes");
+      if (info.mine) bits.push("tvoje rezervace");
+      else if (info.closed) bits.push("zavřeno");
+      else if (info.free > 0 && !disabled) bits.push("volný termín");
+      if (selected) bits.push("vybraný den");
+      html += '<button type="button" class="' + classes + '" data-cal-day="' + value + '" aria-label="' + bits.join(", ") + '"' + (selected ? ' aria-current="date"' : "") + (disabled ? " disabled" : "") + ">" + day + "</button>";
     }
     calGrid.innerHTML = html;
   };
@@ -523,7 +556,10 @@
   openCalBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
       if (isCalOpen()) closeCalendar();
-      else openCalendar();
+      else {
+        calOpener = btn;
+        openCalendar();
+      }
     });
   });
   calModal?.querySelectorAll("[data-cal-close]")?.forEach((btn) => {
@@ -547,6 +583,10 @@
       state.calYear += 1;
     }
     loadCalendar();
+  });
+  calendar?.querySelector("[data-cal-today]")?.addEventListener("click", () => {
+    closeCalendar();
+    loadDay(state.today);
   });
   calGrid?.addEventListener("click", (event) => {
     const btn = event.target.closest("[data-cal-day]");

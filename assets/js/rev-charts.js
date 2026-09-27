@@ -552,7 +552,7 @@
     };
   };
 
-  const mountSeriesChart = (root, canvas, days, opts = {}) => {
+  const mountSeriesChart = (root, canvas, initialDays, initialOpts = {}) => {
     if (!root || !canvas) return null;
     const buttons = Array.from(root.querySelectorAll("[data-chart-kind]"));
     const legend = root.querySelector("[data-chart-legend]");
@@ -560,6 +560,8 @@
     const storageKey = "privofit.chartKind";
     let kind = "line";
     let handle = null;
+    let days = initialDays;
+    let opts = initialOpts;
 
     try {
       const saved = localStorage.getItem(storageKey);
@@ -584,10 +586,10 @@
       canvas.setAttribute("aria-label", aria[kind] || aria.line);
     };
 
-    const draw = () => {
+    const draw = (animate) => {
       if (handle && handle.destroy) handle.destroy();
       const painters = { line: drawLineChart, area: drawAreaChart, bar: drawBarChart };
-      handle = (painters[kind] || drawLineChart)(canvas, days, opts);
+      handle = (painters[kind] || drawLineChart)(canvas, days, { ...opts, animate });
     };
 
     const setKind = (next) => {
@@ -595,7 +597,7 @@
       if (resolved === kind && handle) return;
       kind = resolved;
       applyChrome();
-      draw();
+      draw(opts.animate !== false);
       try {
         localStorage.setItem(storageKey, kind);
       } catch {
@@ -636,9 +638,17 @@
     };
 
     applyChrome();
-    draw();
+    draw(opts.animate !== false);
     requestAnimationFrame(holdScroll);
-    return { setKind };
+    return {
+      setKind,
+      update(nextDays, nextOpts = {}) {
+        days = Array.isArray(nextDays) ? nextDays : [];
+        opts = { ...opts, ...nextOpts, animate: false };
+        applyChrome();
+        draw(false);
+      },
+    };
   };
 
   const drawDonut = (canvas, breakdown, segments) => {

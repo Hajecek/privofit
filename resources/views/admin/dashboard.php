@@ -57,13 +57,14 @@ $statusText = $occupied ? 'Obsazeno' : 'Volno';
 $statusClass = $occupied ? 'is-busy' : 'is-free';
 
 $notifyCount = count($notices) + (($configured && !$online) ? 1 : 0) + ($doorBatteryLow ? 1 : 0);
+$liveRev = (string) ($liveRev ?? '');
 ?>
-<div class="adash">
+<div class="adash" data-dash-root data-dash-url="<?= e(url('/user/sprava/live')) ?>" data-dash-rev="<?= e($liveRev) ?>">
     <header class="adash-hero">
         <div class="adash-hero-copy">
             <p class="eyebrow">SPRÁVA</p>
             <h1>Přehled</h1>
-            <p class="muted"><?= e($todayLabel) ?> · <?= e($nowLocal->format('H:i')) ?></p>
+            <p class="muted" data-dash-clock><?= e($todayLabel) ?> · <?= e($nowLocal->format('H:i')) ?></p>
         </div>
         <div class="adash-hero-tools">
             <a class="adash-chip<?= $doorBatteryLow ? ' is-low' : '' ?>" href="<?= e(url('/user/sprava/vstup')) ?>" data-hero-battery>
@@ -81,11 +82,11 @@ $notifyCount = count($notices) + (($configured && !$online) ? 1 : 0) + ($doorBat
                 </span>
             </a>
             <div class="adash-hero-status">
-            <div class="adash-live <?= e($statusClass) ?>">
+            <div class="adash-live <?= e($statusClass) ?>" data-dash-occupancy>
                 <span class="adash-live-pulse" aria-hidden="true"></span>
                 <div>
-                    <strong><?= e($statusText) ?></strong>
-                    <span><?= $occupied ? e($guestName !== '' ? $guestName . ($slotLabel !== '' ? ' · ' . $slotLabel : '') : 'Aktivní rezervace') : ($nextLabel !== '' ? 'Další: ' . e($nextLabel) : 'Žádný další termín') ?></span>
+                    <strong data-dash-status><?= e($statusText) ?></strong>
+                    <span data-dash-detail><?= $occupied ? e($guestName !== '' ? $guestName . ($slotLabel !== '' ? ' · ' . $slotLabel : '') : 'Aktivní rezervace') : ($nextLabel !== '' ? 'Další: ' . e($nextLabel) : 'Žádný další termín') ?></span>
                 </div>
             </div>
             <div class="adash-notify-wrap">
@@ -122,7 +123,7 @@ $notifyCount = count($notices) + (($configured && !$online) ? 1 : 0) + ($doorBat
                             </a>
                         </li>
                         <?php foreach ($notices as $note): ?>
-                            <li class="adash-note is-unread<?= ($note['tone'] ?? '') !== '' ? ' is-' . e((string) $note['tone']) : '' ?>" data-notify-id="<?= e((string) ($note['key'] ?? '')) ?>">
+                            <li class="adash-note is-unread<?= ($note['tone'] ?? '') !== '' ? ' is-' . e((string) $note['tone']) : '' ?>" data-notify-dynamic data-notify-id="<?= e((string) ($note['key'] ?? '')) ?>">
                                 <button type="button" class="adash-note-seen" data-notify-seen aria-pressed="false" aria-label="Označit jako viděné"></button>
                                 <?php $noteHref = (string) ($note['href'] ?? ''); ?>
                                 <?php if ($noteHref !== ''): ?><a class="adash-note-link" href="<?= e($noteHref) ?>"><?php else: ?><div class="adash-note-link"><?php endif; ?>
@@ -163,7 +164,7 @@ $notifyCount = count($notices) + (($configured && !$online) ? 1 : 0) + ($doorBat
         <div class="adash-chart-head">
             <div>
                 <p class="eyebrow">PŘÍJEM</p>
-                <h2><?= e(money_format_czk($chart['total'] ?? $stats['revenue'] ?? 0)) ?></h2>
+                <h2 data-chart-total><?= e(money_format_czk($chart['total'] ?? $stats['revenue'] ?? 0)) ?></h2>
                 <p
                     class="muted"
                     data-chart-hint
@@ -204,7 +205,7 @@ $notifyCount = count($notices) + (($configured && !$online) ? 1 : 0) + ($doorBat
         <div class="adash-chart-footer">
             <div class="adash-donut-wrap">
                 <canvas data-dash-donut width="120" height="120" aria-hidden="true"></canvas>
-                <ul class="adash-legend">
+                <ul class="adash-legend" data-chart-donut-legend>
                     <?php foreach ($segments as $segment): ?>
                         <?php
                         $segmentColor = (string) ($segment['color'] ?? '');
@@ -219,42 +220,42 @@ $notifyCount = count($notices) + (($configured && !$online) ? 1 : 0) + ($doorBat
             <div class="adash-mini-kpis">
                 <a href="<?= e(url('/user/sprava/trzby?obdobi=dnes')) ?>">
                     <span>Dnes</span>
-                    <strong><?= e(money_format_czk($stats['revenue_today'] ?? 0)) ?></strong>
+                    <strong data-rev-today><?= e(money_format_czk($stats['revenue_today'] ?? 0)) ?></strong>
                 </a>
                 <a href="<?= e(url('/user/sprava/trzby?obdobi=vcera')) ?>">
                     <span>Včera</span>
-                    <strong><?= e(money_format_czk($stats['revenue_yesterday'] ?? 0)) ?></strong>
+                    <strong data-rev-yesterday><?= e(money_format_czk($stats['revenue_yesterday'] ?? 0)) ?></strong>
                 </a>
                 <a href="<?= e(url('/user/sprava/trzby?obdobi=30d')) ?>">
                     <span>Plateb / 30 dní</span>
-                    <strong><?= (int) ($stats['revenue_count_30'] ?? ($chart['count'] ?? 0)) ?></strong>
+                    <strong data-rev-count><?= (int) ($stats['revenue_count_30'] ?? ($chart['count'] ?? 0)) ?></strong>
                 </a>
             </div>
         </div>
     </section>
 
     <section class="adash-kpis" aria-label="Klíčové ukazatele">
-        <article class="adash-kpi">
+        <article class="adash-kpi" data-kpi="today_reservations">
             <span>Rezervace dnes</span>
             <strong><?= (int) ($stats['today_reservations'] ?? 0) ?></strong>
         </article>
-        <article class="adash-kpi">
+        <article class="adash-kpi" data-kpi="entries">
             <span>Vstupy dnes</span>
             <strong><?= (int) ($stats['entries'] ?? 0) ?></strong>
         </article>
-        <article class="adash-kpi<?= (int) ($stats['failed_access'] ?? 0) > 0 ? ' is-alert' : '' ?>">
+        <article class="adash-kpi<?= (int) ($stats['failed_access'] ?? 0) > 0 ? ' is-alert' : '' ?>" data-kpi="failed_access">
             <span>Neúspěšné</span>
             <strong><?= (int) ($stats['failed_access'] ?? 0) ?></strong>
         </article>
-        <article class="adash-kpi">
+        <article class="adash-kpi" data-kpi="active_members">
             <span>Aktivní členové</span>
             <strong><?= (int) ($stats['active_members'] ?? 0) ?></strong>
         </article>
-        <a class="adash-kpi adash-kpi-link" href="<?= e(url('/user/sprava/zakaznici')) ?>">
+        <a class="adash-kpi adash-kpi-link" href="<?= e(url('/user/sprava/zakaznici')) ?>" data-kpi="customers">
             <span>Zákazníci</span>
             <strong><?= (int) ($stats['customers'] ?? 0) ?></strong>
         </a>
-        <a class="adash-kpi adash-kpi-link" href="<?= e(url('/user/sprava/zajem')) ?>">
+        <a class="adash-kpi adash-kpi-link" href="<?= e(url('/user/sprava/zajem')) ?>" data-kpi="interest">
             <span>Zájem</span>
             <strong><?= (int) ($stats['interest'] ?? 0) ?></strong>
         </a>
@@ -267,8 +268,9 @@ $notifyCount = count($notices) + (($configured && !$online) ? 1 : 0) + ($doorBat
                     <p class="eyebrow">DNES</p>
                     <h2>Harmonogram</h2>
                 </div>
-                <span class="badge badge-muted"><?= count($todayList) ?></span>
+                <span class="badge badge-muted" data-dash-schedule-count><?= count($todayList) ?></span>
             </div>
+            <div data-dash-schedule-body>
             <?php if ($occupied && $reservation): ?>
                 <div class="adash-now">
                     <span class="eyebrow">PRÁVĚ TEĎ</span>
@@ -327,6 +329,7 @@ $notifyCount = count($notices) + (($configured && !$online) ? 1 : 0) + ($doorBat
                     <?php endforeach; ?>
                 </ul>
             <?php endif; ?>
+            </div>
         </section>
 
         <div class="adash-side">
@@ -367,10 +370,10 @@ $notifyCount = count($notices) + (($configured && !$online) ? 1 : 0) + ($doorBat
     <nav class="adash-links" aria-label="Rychlé odkazy">
         <a href="<?= e(url('/user/sprava/rezervace')) ?>"><strong>Rezervace</strong><span>Zrušení termínů</span></a>
         <a href="<?= e(url('/user/sprava/trzby')) ?>"><strong>Tržby</strong><span>Platby a grafy</span></a>
-        <a href="<?= e(url('/user/sprava/zakaznici')) ?>"><strong>Zákazníci</strong><span><?= (int) ($stats['customers'] ?? 0) ?> účtů</span></a>
+        <a href="<?= e(url('/user/sprava/zakaznici')) ?>"><strong>Zákazníci</strong><span data-link-customers><?= (int) ($stats['customers'] ?? 0) ?> účtů</span></a>
         <a href="<?= e(url('/user/studio')) ?>"><strong>Studia</strong><span>Prostory</span></a>
         <a href="<?= e(url('/user/sprava/tarify')) ?>"><strong>Tarify</strong><span>Ceník</span></a>
-        <a href="<?= e(url('/user/sprava/zajem')) ?>"><strong>Zájem</strong><span><?= (int) ($stats['interest'] ?? 0) ?> leadů</span></a>
+        <a href="<?= e(url('/user/sprava/zajem')) ?>"><strong>Zájem</strong><span data-link-interest><?= (int) ($stats['interest'] ?? 0) ?> leadů</span></a>
         <a href="<?= e(url('/user/sprava/nastaveni')) ?>"><strong>Nastavení</strong><span>Pravidla</span></a>
     </nav>
 </div>

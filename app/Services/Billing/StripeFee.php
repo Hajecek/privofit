@@ -140,6 +140,22 @@ final class StripeFee
     }
 
     /**
+     * Vybraná zveřejněná sazba, když není nižší než poplatek skutečné karty. Jinak sazba karty.
+     *
+     * @return Quote
+     */
+    public static function chosenOrCover(string|float|int $netAmount, int $shownMinor, string $country): array
+    {
+        $required = self::coverFor($netAmount, $country);
+        foreach (self::variants($netAmount) as $quote) {
+            if ($quote['chargeMinor'] === $shownMinor && $quote['chargeMinor'] >= $required['chargeMinor']) {
+                return $quote;
+            }
+        }
+        return $required;
+    }
+
+    /**
      * @return Quote
      */
     public static function cover(string|float|int $netAmount): array

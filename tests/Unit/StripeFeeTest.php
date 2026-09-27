@@ -85,6 +85,15 @@ final class StripeFeeTest extends TestCase
         $this->assertSame('1545.17', StripeFee::coverFor('1490.00', 'US')['charge']);
     }
 
+    public function testChosenHigherPriceStaysAndLowerForeignPriceRises(): void
+    {
+        $foreign = StripeFee::coverFor('1490.00', 'US');
+        $kept = StripeFee::chosenOrCover('1490.00', $foreign['chargeMinor'], 'CZ');
+        $this->assertSame('1545.17', $kept['charge']);
+        $raised = StripeFee::chosenOrCover('1490.00', StripeFee::coverFor('1490.00', 'CZ')['chargeMinor'], 'US');
+        $this->assertSame('1545.17', $raised['charge']);
+    }
+
     public function testEmptyCountryStaysEuropean(): void
     {
         $priced = StripeFee::coverForMethod('1100.00', [

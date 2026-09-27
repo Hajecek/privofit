@@ -66,14 +66,32 @@
     walletsEl?.classList.toggle("is-ready", available);
     if (orEl) orEl.hidden = !available;
   });
+  let selectedKey = "apple";
+
+  const markChoice = (minor) => {
+    const buttons = [...root.querySelectorAll("[data-choice]")];
+    const current = buttons.find((el) => el.getAttribute("data-choice") === selectedKey && Number(el.dataset.minor) === Number(minor));
+    const match = current || buttons.find((el) => Number(el.dataset.minor) === Number(minor));
+    if (!match) return;
+    selectedKey = match.getAttribute("data-choice") || selectedKey;
+    buttons.forEach((el) => el.classList.toggle("is-on", el === match));
+  };
+
   const paint = (quote) => {
     shownMinor = Number(quote.chargeMinor || shownMinor);
     if (feeEl) feeEl.textContent = crowns(quote.fee);
-    if (feeLabelEl) {
-      const label = quote.label || "karty";
-      feeLabelEl.textContent = /karta/i.test(label) ? label : "Poplatek " + label;
-    }
+    if (feeLabelEl && quote.label) feeLabelEl.textContent = quote.label;
     if (chargeEl) chargeEl.textContent = crowns(quote.charge);
+    markChoice(shownMinor);
+  };
+
+  const walletHint = root.querySelector("[data-wallet-hint]");
+
+  const applyMode = () => {
+    if (!walletHint) return;
+    walletHint.textContent = selectedKey === "google"
+      ? "Nebo tlačítkem Google Pay."
+      : "Nebo tlačítkem Apple Pay.";
   };
 
   const useQuote = async (quote) => {
@@ -82,7 +100,26 @@
     await elements.update({ amount: shownMinor });
   };
 
-  wallets.on("click", (event) => {
+  root.querySelectorAll("[data-choice]").forEach((node) => {
+    node.addEventListener("click", () => {
+      const key = node.getAttribute("data-choice") || "";
+      const quote = quotes[key];
+      if (!quote || busy) return;
+      selectedKey = key;
+      markChoice(quote.chargeMinor);
+      applyMode();
+      quoteReady = useQuote(quote);
+    });
+  });
+  applyMode();
+
+  wallets.on("click", async (event) => {
+    const key = event.expressPaymentType === "google_pay" ? "google" : "apple";
+    const quote = quotes[key];
+    if (quote && Number(quote.chargeMinor) !== shownMinor) {
+      selectedKey = key;
+      await useQuote(quote);
+    }
     event.resolve({
       lineItems: [{ name: config.title || "PRIVOFIT", amount: shownMinor }],
     });
@@ -93,12 +130,6 @@
     wallets: { applePay: "never", googlePay: "never" },
   });
   paymentElement.mount("#payment-element");
-  paymentElement.on("change", (event) => {
-    if (busy) return;
-    const quote = event?.value?.type === "link" ? quotes.link : quotes.card;
-    if (!quote || Number(quote.chargeMinor) === shownMinor) return;
-    quoteReady = useQuote(quote);
-  });
 
   const post = async (body) => {
     const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
@@ -140,18 +171,10 @@
     await quoteReady;
     let data = await authorize();
     if (!data) return false;
-    if (!data.ready && options.keepAmount) {
+    if (!data.ready) {
       await useQuote(data);
+      applyMode();
       showError("Poplatek u téhle karty je jiný. Částka dole už sedí, potvrď platbu znovu.");
-      return false;
-    }
-    if (!data.ready) {
-      await useQuote(data);
-      data = await authorize();
-      if (!data) return false;
-    }
-    if (!data.ready) {
-      showError("Částku se nepodařilo sladit s kartou. Zkus to znovu.");
       return false;
     }
     if (data.status === "requires_action" && data.clientSecret) {

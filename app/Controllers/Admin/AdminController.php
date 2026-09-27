@@ -26,6 +26,34 @@ final class AdminController extends Controller
         if (is_admin_user() && admin_view_mode() === 'user') {
             $this->redirect('/user');
         }
+        $loaded = $this->loadDashboard();
+        $live = $this->presentDashboard($loaded['stats'], $loaded['chart']);
+
+        $this->view('admin/dashboard', [
+            'title' => 'Přehled správy',
+            'stats' => $loaded['stats'],
+            'chart' => $loaded['chart'],
+            'liveRev' => $this->dashboardRevision($live),
+            'pageScripts' => ['js/rev-charts.js', 'js/admin-dash.js', 'js/customers.js'],
+        ]);
+    }
+
+    public function dashboardLive(): never
+    {
+        if (is_admin_user() && admin_view_mode() === 'user') {
+            $this->jsonError('Přehled správy je v uživatelském režimu skrytý.', 403);
+        }
+        $loaded = $this->loadDashboard(false);
+        $live = $this->presentDashboard($loaded['stats'], $loaded['chart']);
+        $live['rev'] = $this->dashboardRevision($live);
+        $this->jsonOk($live);
+    }
+
+    /**
+     * @return array{stats: array<string, mixed>, chart: array<string, mixed>}
+     */
+    private function loadDashboard(bool $probeDoor = true): array
+    {
         $db = $this->app->db();
         $todayStart = Clock::toUtc(Clock::nowLocal()->setTime(0, 0))->format('Y-m-d H:i:s');
         $todayEnd = Clock::toUtc(Clock::nowLocal()->setTime(0, 0)->modify('+1 day'))->format('Y-m-d H:i:s');
@@ -57,7 +85,10 @@ final class AdminController extends Controller
         );
 
         $stats = [
-            'active_members' => (int) $db->fetchColumn("SELECT COUNT(*) FROM memberships WHERE status = 'active'"),
+            'active_members' => (int) $db->fetchColumn(
+                "SELECT COUNT(DISTINCT user_id) FROM memberships
+                 WHERE status = 'active' AND (ends_at IS NULL OR ends_at > UTC_TIMESTAMP())"
+            ),
             'today_reservations' => count($todayReservations),
             'current' => ReservationService::make($db)->occupancyNow(),
             'next' => $next,
@@ -90,7 +121,9 @@ final class AdminController extends Controller
             ),
             'entries' => (int) $db->fetchColumn("SELECT COUNT(*) FROM access_logs WHERE authorization_result = 'granted' AND created_at >= :a", ['a' => $todayStart]),
             'failed_access' => (int) $db->fetchColumn("SELECT COUNT(*) FROM access_logs WHERE authorization_result = 'denied' AND created_at >= :a", ['a' => $todayStart]),
-            'door' => AccessControlService::make($db)->doorStatus(),
+            'door' => $probeDoor
+                ? AccessControlService::make($db)->doorStatus()
+                : ['configured' => false],
             'interest' => 0,
             'customers' => (int) $db->fetchColumn('SELECT COUNT(*) FROM users WHERE deleted_at IS NULL AND role = \'user\''),
         ];
@@ -101,14 +134,221 @@ final class AdminController extends Controller
 
         $chartFrom = Clock::nowLocal()->modify('-29 days')->setTime(0, 0);
         $chartTo = Clock::nowLocal()->setTime(0, 0)->modify('+1 day');
-        $chart = $this->revenueAnalytics($chartFrom, $chartTo);
 
-        $this->view('admin/dashboard', [
-            'title' => 'Přehled správy',
+        return [
             'stats' => $stats,
-            'chart' => $chart,
-            'pageScripts' => ['js/rev-charts.js', 'js/admin-dash.js', 'js/customers.js'],
-        ]);
+            'chart' => $this->revenueAnalytics($chartFrom, $chartTo),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $stats
+     * @param array<string, mixed> $chart
+     * @return array<string, mixed>
+     */
+    private function presentDashboard(array $stats, array $chart): array
+    {
+        $nowLocal = Clock::nowLocal();
+        $dayNames = [1 => 'pondělí', 2 => 'úterý', 3 => 'středa', 4 => 'čtvrtek', 5 => 'pátek', 6 => 'sobota', 7 => 'neděle'];
+        $current = is_array($stats['current'] ?? null) ? $stats['current'] : [];
+        $reservation = is_array($current['reservation'] ?? null) ? $current['reservation'] : null;
+        $occupied = !empty($current['occupied']);
+        $next = is_array($stats['next'] ?? null) ? $stats['next'] : null;
+        $todayList = is_array($stats['today_list'] ?? null) ? $stats['today_list'] : [];
+
+        $guestName = '';
+        $slotLabel = '';
+        if ($reservation) {
+            $guestName = trim((string) (($reservation['first_name'] ?? '') . ' ' . ($reservation['last_name'] ?? '')));
+            if (!empty($reservation['starts_at']) && !empty($reservation['ends_at'])) {
+                $start = Clock::toLocal((string) $reservation['starts_at']);
+                $end = $this->blockEnd((string) $reservation['ends_at'], $reservation['buffer_minutes'] ?? 15);
+                $endClock = $end->format('Y-m-d') === $start->format('Y-m-d') ? $end->format('H:i') : $end->format('j. n. H:i');
+                $slotLabel = $start->format('H:i') . '–' . $endClock;
+            }
+        }
+
+        $nextLabel = '';
+        if ($next && !empty($next['starts_at'])) {
+            $ns = Clock::toLocal((string) $next['starts_at']);
+            $nextName = trim((string) (($next['first_name'] ?? '') . ' ' . ($next['last_name'] ?? '')));
+            $nextWhen = $ns->format('Y-m-d') === $nowLocal->format('Y-m-d')
+                ? $ns->format('H:i')
+                : ($dayNames[(int) $ns->format('N')] ?? '') . ' ' . $ns->format('j. n.') . ' ' . $ns->format('H:i');
+            $nextLabel = $nextWhen . ($nextName !== '' ? ' · ' . $nextName : '');
+        }
+
+        $detail = $occupied
+            ? ($guestName !== '' ? $guestName . ($slotLabel !== '' ? ' · ' . $slotLabel : '') : 'Aktivní rezervace')
+            : ($nextLabel !== '' ? 'Další: ' . $nextLabel : 'Žádný další termín');
+
+        $items = [];
+        foreach ($todayList as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $rs = Clock::toLocal((string) $row['starts_at']);
+            $re = $this->blockEnd((string) $row['ends_at'], $row['buffer_minutes'] ?? 15);
+            $endClock = $re->format('Y-m-d') === $rs->format('Y-m-d') ? $re->format('H:i') : $re->format('j. n. H:i');
+            $name = trim((string) (($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? '')));
+            if ($name === '') {
+                $name = (string) ($row['username'] ?? 'Zákazník');
+            }
+            $isLive = $occupied && $reservation && (int) ($reservation['id'] ?? 0) === (int) ($row['id'] ?? 0);
+            $isPast = $re < $nowLocal;
+            $pending = ($row['status'] ?? '') === 'pending_payment';
+            $publicId = (string) ($row['user_public_id'] ?? '');
+            $reservationId = (string) ($row['public_id'] ?? '');
+            $canCancel = in_array((string) ($row['status'] ?? ''), ['confirmed', 'pending_payment'], true) && $reservationId !== '';
+            if ($isLive) {
+                $badge = 'Teď';
+                $badgeClass = 'badge-warn';
+            } elseif ($pending) {
+                $badge = 'Platba';
+                $badgeClass = 'badge-muted';
+            } elseif ($isPast) {
+                $badge = 'Hotovo';
+                $badgeClass = 'badge-done';
+            } else {
+                $badge = 'Čeká';
+                $badgeClass = 'badge-ok';
+            }
+            $items[] = [
+                'time' => $rs->format('H:i'),
+                'end' => $endClock,
+                'name' => $name,
+                'href' => $publicId !== '' ? url('/user/sprava/zakaznici/' . $publicId) : '',
+                'meta' => (string) ($row['room_name'] ?? 'Studio') . ($pending ? ' · čeká na platbu' : ''),
+                'live' => $isLive,
+                'past' => $isPast,
+                'badge' => $badge,
+                'badge_class' => $badgeClass,
+                'cancel_url' => $canCancel ? url('/user/sprava/rezervace/' . $reservationId . '/zrusit') : '',
+                'cancel_name' => $name . ' · ' . $rs->format('H:i') . '–' . $endClock,
+            ];
+        }
+
+        $notices = [];
+        foreach (is_array($stats['notices'] ?? null) ? $stats['notices'] : [] as $note) {
+            if (!is_array($note)) {
+                continue;
+            }
+            $notices[] = [
+                'key' => (string) ($note['key'] ?? ''),
+                'tone' => (string) ($note['tone'] ?? ''),
+                'href' => (string) ($note['href'] ?? ''),
+                'avatar' => (string) ($note['avatar'] ?? ''),
+                'initials' => (string) ($note['initials'] ?? 'P'),
+                'title' => (string) ($note['title'] ?? ''),
+                'kind' => (string) ($note['kind'] ?? ''),
+                'kind_class' => (string) ($note['kind_class'] ?? ''),
+                'when' => (string) ($note['when'] ?? ''),
+                'text' => (string) ($note['text'] ?? ''),
+            ];
+        }
+
+        $days = [];
+        foreach (is_array($chart['days'] ?? null) ? $chart['days'] : [] as $day) {
+            if (!is_array($day)) {
+                continue;
+            }
+            $rawParts = $day['parts'] ?? [];
+            if ($rawParts instanceof \stdClass) {
+                $rawParts = (array) $rawParts;
+            }
+            $parts = [];
+            if (is_array($rawParts)) {
+                foreach ($rawParts as $key => $value) {
+                    $parts[(string) $key] = round((float) $value, 2);
+                }
+            }
+            $days[] = [
+                'date' => (string) ($day['date'] ?? ''),
+                'label' => (string) ($day['label'] ?? ''),
+                'amount' => round((float) ($day['amount'] ?? 0), 2),
+                'count' => (int) ($day['count'] ?? 0),
+                'reservations' => round((float) ($day['reservations'] ?? 0), 2),
+                'memberships' => round((float) ($day['memberships'] ?? 0), 2),
+                'other' => round((float) ($day['other'] ?? 0), 2),
+                'parts' => (object) $parts,
+            ];
+        }
+
+        $segments = [];
+        foreach (is_array($chart['segments'] ?? null) ? $chart['segments'] : [] as $segment) {
+            if (!is_array($segment)) {
+                continue;
+            }
+            $segments[] = [
+                'key' => (string) ($segment['key'] ?? ''),
+                'label' => (string) ($segment['label'] ?? ''),
+                'color' => (string) ($segment['color'] ?? ''),
+                'amount' => round((float) ($segment['amount'] ?? 0), 2),
+                'amount_label' => money_format_czk($segment['amount'] ?? 0),
+            ];
+        }
+
+        $breakdown = is_array($chart['breakdown'] ?? null) ? $chart['breakdown'] : [];
+
+        return [
+            'clock' => ($dayNames[(int) $nowLocal->format('N')] ?? '') . ' ' . $nowLocal->format('j. n. Y') . ' · ' . $nowLocal->format('H:i'),
+            'occupancy' => [
+                'occupied' => $occupied,
+                'status' => $occupied ? 'Obsazeno' : 'Volno',
+                'detail' => $detail,
+            ],
+            'kpis' => [
+                'today_reservations' => (int) ($stats['today_reservations'] ?? 0),
+                'entries' => (int) ($stats['entries'] ?? 0),
+                'failed_access' => (int) ($stats['failed_access'] ?? 0),
+                'active_members' => (int) ($stats['active_members'] ?? 0),
+                'customers' => (int) ($stats['customers'] ?? 0),
+                'interest' => (int) ($stats['interest'] ?? 0),
+            ],
+            'money' => [
+                'total' => money_format_czk($chart['total'] ?? $stats['revenue'] ?? 0),
+                'today' => money_format_czk($stats['revenue_today'] ?? 0),
+                'yesterday' => money_format_czk($stats['revenue_yesterday'] ?? 0),
+                'count' => (int) ($stats['revenue_count_30'] ?? ($chart['count'] ?? 0)),
+            ],
+            'chart' => [
+                'days' => $days,
+                'breakdown' => [
+                    'reservations' => round((float) ($breakdown['reservations'] ?? 0), 2),
+                    'memberships' => round((float) ($breakdown['memberships'] ?? 0), 2),
+                    'other' => round((float) ($breakdown['other'] ?? 0), 2),
+                ],
+                'segments' => $segments,
+                'total' => round((float) ($chart['total'] ?? 0), 2),
+                'count' => (int) ($chart['count'] ?? 0),
+            ],
+            'schedule' => [
+                'count' => count($items),
+                'now' => ($occupied && $reservation) ? [
+                    'name' => $guestName !== '' ? $guestName : 'Zákazník',
+                    'slot' => $slotLabel !== '' ? $slotLabel : 'Probíhající termín',
+                ] : null,
+                'empty' => $items === []
+                    ? 'Dnes žádné rezervace.' . ($nextLabel !== '' ? ' Další termín ' . $nextLabel . '.' : '')
+                    : '',
+                'items' => $items,
+            ],
+            'notices' => $notices,
+        ];
+    }
+
+    /** @param array<string, mixed> $live */
+    private function dashboardRevision(array $live): string
+    {
+        $stamp = $live;
+        unset($stamp['clock'], $stamp['rev']);
+        $encoded = json_encode($stamp, JSON_UNESCAPED_UNICODE);
+        return substr(hash('sha256', is_string($encoded) ? $encoded : ''), 0, 16);
+    }
+
+    private function blockEnd(string $endsAt, mixed $buffer): \DateTimeImmutable
+    {
+        return Clock::toLocal($endsAt)->modify('+' . max(0, (int) $buffer) . ' minutes');
     }
 
     /** @return list<array<string, mixed>> */

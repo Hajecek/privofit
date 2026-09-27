@@ -1,6 +1,6 @@
 (() => {
   if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    const skip = ".toast, .cancel-modal, .pay-modal, .adash, [hidden]";
+    const skip = ".toast, .cancel-modal, .pay-modal, .cal-modal, .adash, [hidden]";
     const stamp = (nodes) => {
       nodes.forEach((el) => {
         if (!el.matches(skip)) el.classList.add("page-rise");

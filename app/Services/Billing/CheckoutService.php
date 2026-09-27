@@ -204,7 +204,7 @@ final class CheckoutService
         }
         $net = number_format((float) ($payment['amount'] ?? 0), 2, '.', '');
         $inspected = StripeFee::inspectMethod($preview);
-        $priced = StripeFee::coverFor($net, $inspected['country']);
+        $priced = StripeFee::chosenOrCover($net, $shownMinor, $inspected['country']);
         $quote = $this->publicQuote($priced, $inspected);
         if ($shownMinor !== $priced['chargeMinor']) {
             return ['ready' => false] + $quote;
@@ -404,13 +404,19 @@ final class CheckoutService
         }
         $reservation = $payment['reservation_id'] ? $this->reservations->findById((int) $payment['reservation_id']) : null;
         $when = $reservation ? Clock::format((string) $reservation['starts_at'], 'j. n. Y H:i') . '–' . Clock::format((string) $reservation['ends_at'], 'H:i') : '';
-        $date = $reservation ? Clock::format((string) $reservation['starts_at'], 'Y-m-d') : '';
+        $date = $reservation ? Clock::format((string) $reservation['starts_at'], 'j. n. Y') : '';
+        $time = $reservation
+            ? Clock::format((string) $reservation['starts_at'], 'H:i') . '–' . Clock::format((string) $reservation['ends_at'], 'H:i')
+            : '';
+        $dateKey = $reservation ? Clock::format((string) $reservation['starts_at'], 'Y-m-d') : '';
         $cancel = '/user/rezervace/platba/zruseno?platba=' . rawurlencode((string) $payment['public_id']);
-        if ($date !== '') {
-            $cancel .= '&date=' . rawurlencode($date);
+        if ($dateKey !== '') {
+            $cancel .= '&date=' . rawurlencode($dateKey);
         }
         return [
             'title' => $when !== '' ? 'Rezervace ' . $when : 'Rezervace',
+            'date' => $date,
+            'time' => $time,
             'description' => 'PRIVOFIT rezervace' . ($when !== '' ? ' ' . $when : ''),
             'cancelUrl' => $cancel,
             'doneUrl' => '/user/moje-rezervace',

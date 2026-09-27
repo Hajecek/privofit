@@ -211,9 +211,10 @@
     });
   };
 
-  document.querySelectorAll("[data-cust-open]").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-cust-open]");
+    if (!button) return;
+    event.preventDefault();
       event.stopPropagation();
       if (button.disabled) return;
       const kind = button.getAttribute("data-cust-open") || "";
@@ -240,7 +241,6 @@
           ? () => setSeg(seg, previous)
           : null,
       });
-    });
   });
 
   modal.querySelectorAll("[data-cust-close]").forEach((el) => {

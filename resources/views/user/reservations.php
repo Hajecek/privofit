@@ -6,9 +6,14 @@ $max = (int) ($availability['max_minutes'] ?? 1440);
 $buffer = (int) ($availability['buffer_minutes'] ?? 15);
 $maxPersons = (int) ($availability['max_persons'] ?? 2);
 $dayNames = [1 => 'pondělí', 2 => 'úterý', 3 => 'středa', 4 => 'čtvrtek', 5 => 'pátek', 6 => 'sobota', 7 => 'neděle'];
+$dowShort = [1 => 'PO', 2 => 'ÚT', 3 => 'ST', 4 => 'ČT', 5 => 'PÁ', 6 => 'SO', 7 => 'NE'];
 $monthsGen = [1 => 'ledna', 2 => 'února', 3 => 'března', 4 => 'dubna', 5 => 'května', 6 => 'června', 7 => 'července', 8 => 'srpna', 9 => 'září', 10 => 'října', 11 => 'listopadu', 12 => 'prosince'];
+$monthsShort = [1 => 'LED', 2 => 'ÚNO', 3 => 'BŘE', 4 => 'DUB', 5 => 'KVĚ', 6 => 'ČVN', 7 => 'ČVC', 8 => 'SRP', 9 => 'ZÁŘ', 10 => 'ŘÍJ', 11 => 'LIS', 12 => 'PRO'];
 $localDay = \App\Support\Clock::parseLocal($date . ' 12:00:00');
 $dateLabel = $dayNames[(int) $localDay->format('N')] . ' ' . (int) $localDay->format('j') . '. ' . $monthsGen[(int) $localDay->format('n')];
+$sheetMonth = $monthsShort[(int) $localDay->format('n')];
+$sheetDow = $dowShort[(int) $localDay->format('N')];
+$sheetDay = (int) $localDay->format('j');
 $payload = [
     'date' => $date,
     'today' => $today,
@@ -55,26 +60,59 @@ $payload = [
         </div>
     <?php endif; ?>
 
-    <button type="button" class="booker-date-btn card" data-open-cal aria-haspopup="dialog" aria-expanded="false">
-        <span class="booker-date-kicker">Vybraný den</span>
-        <strong data-date-label><?= e($dateLabel) ?></strong>
-        <span class="booker-date-action">Otevřít kalendář</span>
+    <button type="button" class="cal-trigger" data-open-cal aria-haspopup="dialog" aria-expanded="false">
+        <span class="cal-sheet" aria-hidden="true">
+            <span class="cal-sheet-rings"><i></i><i></i></span>
+            <span class="cal-sheet-month" data-sheet-month><?= e($sheetMonth) ?></span>
+            <span class="cal-sheet-day" data-sheet-day><?= (int) $sheetDay ?></span>
+            <span class="cal-sheet-dow" data-sheet-dow><?= e($sheetDow) ?></span>
+        </span>
+        <span class="cal-trigger-copy">
+            <span class="cal-trigger-kicker">Kalendář</span>
+            <strong data-date-label><?= e($dateLabel) ?></strong>
+            <span class="cal-trigger-hint">Klikni a vyber den</span>
+        </span>
+        <span class="cal-trigger-go" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 6l6 6-6 6"/>
+            </svg>
+        </span>
     </button>
 
     <div class="cal-modal" data-cal-modal hidden>
         <div class="cal-modal-backdrop" data-cal-close></div>
         <section class="cal-modal-panel" data-calendar role="dialog" aria-modal="true" aria-labelledby="calendar-title">
-            <header class="cal-head">
-                <button type="button" class="cal-nav" data-cal-prev aria-label="Předchozí měsíc">‹</button>
-                <h2 id="calendar-title" data-cal-title>Kalendář</h2>
-                <button type="button" class="cal-nav" data-cal-next aria-label="Další měsíc">›</button>
+            <header class="cal-modal-top">
+                <div>
+                    <p class="cal-modal-kicker">Kalendář</p>
+                    <h2 id="calendar-title">Vyber den</h2>
+                </div>
+                <button type="button" class="cal-modal-x" data-cal-close aria-label="Zavřít kalendář">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                        <path d="M6 6l12 12M18 6L6 18"/>
+                    </svg>
+                </button>
             </header>
+            <div class="cal-head">
+                <button type="button" class="cal-nav" data-cal-prev aria-label="Předchozí měsíc">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+                </button>
+                <h3 data-cal-title>Kalendář</h3>
+                <button type="button" class="cal-nav" data-cal-next aria-label="Další měsíc">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+                </button>
+            </div>
             <div class="cal-weekdays" aria-hidden="true">
                 <span>Po</span><span>Út</span><span>St</span><span>Čt</span><span>Pá</span><span>So</span><span>Ne</span>
             </div>
             <div class="cal-grid" data-cal-grid></div>
-            <p class="cal-legend muted"><i class="cal-key is-free"></i> Volný termín <i class="cal-key is-mine"></i> Tvoje rezervace</p>
-            <button type="button" class="cal-modal-close" data-cal-close>Zavřít</button>
+            <footer class="cal-foot">
+                <p class="cal-legend"><i class="cal-key is-free"></i> Volný termín <i class="cal-key is-mine"></i> Tvoje rezervace</p>
+                <div class="cal-foot-actions">
+                    <button type="button" class="cal-today" data-cal-today>Dnes</button>
+                    <button type="button" class="cal-modal-close" data-cal-close>Zavřít</button>
+                </div>
+            </footer>
         </section>
     </div>
 
