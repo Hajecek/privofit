@@ -8,6 +8,7 @@ use App\Core\Crypto;
 use App\Core\Database;
 use App\Core\Env;
 use App\Services\Auth\AuthService;
+use App\Services\Cron\Jobs\DailyRevenueJob;
 use App\Services\Cron\Jobs\ReservationReminderJob;
 use App\Services\Cron\NotificationDispatcher;
 use App\Services\ReservationAdminNotice;
@@ -297,6 +298,88 @@ final class CronNotificationTest extends TestCase
                 $pdo->rollBack();
             }
         }
+    }
+
+    public function testDailyRevenueReachesAdminOncePerTestSlot(): void
+    {
+        try {
+            $this->db->fetch('SELECT id FROM cron_events LIMIT 1');
+        } catch (\Throwable) {
+            $this->markTestSkipped('Chybí tabulka cron_events. Spusťte migrace.');
+        }
+
+        $customer = $this->createVerifiedUser('trzba');
+        $admin = $this->createVerifiedUser('trzadm');
+        $customerId = (int) $customer['id'];
+        $adminId = (int) $admin['id'];
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $this->db->update('users', ['role' => 'admin'], 'id = :id', ['id' => $adminId]);
+            $now = new \DateTimeImmutable('2099-08-15 10:07:00', new \DateTimeZone('UTC'));
+            $this->insertPayment($customerId, '1000.00', 'paid', 'stripe', '2099-08-15 08:00:00');
+            $this->insertPayment($customerId, '250.00', 'paid', 'stripe', '2099-08-15 09:30:00');
+            $this->insertPayment($customerId, '500.00', 'paid', 'gift', '2099-08-15 09:40:00');
+            $this->insertPayment($customerId, '800.00', 'pending', 'stripe', '2099-08-15 09:45:00');
+            $this->insertPayment($customerId, '900.00', 'paid', 'stripe', '2099-08-14 10:00:00');
+
+            $notify = NotificationDispatcher::make($this->db);
+            $job = new DailyRevenueJob($this->db, $notify, $now);
+            $this->assertSame(1, $job->run()['scheduled']);
+            $this->assertSame(0, $job->run()['scheduled']);
+
+            $event = $this->db->fetch(
+                "SELECT event_key, audience, payload_json FROM cron_events WHERE event_key = :key",
+                ['key' => 'admin:revenue.today:2099-08-15T12:05']
+            );
+            $this->assertIsArray($event);
+            $this->assertSame('admin', $event['audience']);
+            $payload = json_decode((string) $event['payload_json'], true);
+            $this->assertSame('💰 Dnešní tržba', $payload['subject']);
+            $this->assertStringContainsString('1 250 Kč', (string) $payload['body']);
+            $this->assertStringContainsString('2 nákupy', (string) $payload['body']);
+            $this->assertStringContainsString('🔥', (string) $payload['body']);
+
+            $this->assertSame('dispatched', $notify->dispatchKey((string) $event['event_key']));
+            $this->assertSame(1, $this->countChannel($adminId, 'admin-revenue', 'email'));
+            $this->assertSame(1, $this->countChannel($adminId, 'admin-revenue', 'in_app'));
+            $this->assertSame(0, $this->countNotes($customerId, 'admin-revenue'));
+
+            $again = new DailyRevenueJob($this->db, $notify, $now->modify('+5 minutes'));
+            $this->assertSame(1, $again->run()['scheduled']);
+
+            $quiet = new DailyRevenueJob(
+                $this->db,
+                $notify,
+                new \DateTimeImmutable('2099-01-02 10:07:00', new \DateTimeZone('UTC'))
+            );
+            $this->assertSame(1, $quiet->run()['scheduled']);
+            $empty = json_decode((string) $this->db->fetchColumn(
+                'SELECT payload_json FROM cron_events WHERE event_key = :key',
+                ['key' => 'admin:revenue.today:2099-01-02T11:05']
+            ), true);
+            $this->assertSame('🌱 Dnešní tržba', $empty['subject']);
+            $this->assertStringContainsString('0 Kč', (string) $empty['body']);
+        } finally {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+        }
+    }
+
+    private function insertPayment(int $userId, string $amount, string $status, string $provider, string $paidAt): void
+    {
+        $this->db->insert('payments', [
+            'public_id' => Crypto::uuid(),
+            'user_id' => $userId,
+            'provider' => $provider,
+            'amount' => $amount,
+            'currency' => 'CZK',
+            'status' => $status,
+            'paid_at' => $status === 'paid' ? $paidAt : null,
+            'created_at' => $paidAt,
+            'updated_at' => $paidAt,
+        ]);
     }
 
     private function countNotes(int $userId, string $template): int

@@ -6,6 +6,7 @@ namespace App\Services\Cron;
 
 use App\Core\Database;
 use App\Core\Logger;
+use App\Services\Cron\Jobs\DailyRevenueJob;
 use App\Services\Cron\Jobs\DispatchNotificationsJob;
 use App\Services\Cron\Jobs\ExpireHoldsJob;
 use App\Services\Cron\Jobs\ExpireMembershipsJob;
@@ -46,6 +47,7 @@ final class CronRunner
                 new ReservationReminderJob($this->db, $notify),
                 new MembershipReminderJob($this->db, $notify),
                 new OpsAlertJob($this->db, $notify),
+                new DailyRevenueJob($this->db, $notify),
                 new DispatchNotificationsJob($notify),
                 new SendMailJob($this->db),
                 new PurgeRetentionJob($this->db),

@@ -3,7 +3,6 @@ $stats = is_array($stats ?? null) ? $stats : [];
 $chart = is_array($chart ?? null) ? $chart : ['days' => [], 'breakdown' => [], 'total' => 0, 'count' => 0];
 $current = is_array($stats['current'] ?? null) ? $stats['current'] : [];
 $door = is_array($stats['door'] ?? null) ? $stats['door'] : [];
-$todayList = is_array($stats['today_list'] ?? null) ? $stats['today_list'] : [];
 $notices = is_array($stats['notices'] ?? null) ? $stats['notices'] : [];
 $next = is_array($stats['next'] ?? null) ? $stats['next'] : null;
 $occupied = !empty($current['occupied']);
@@ -263,71 +262,127 @@ $liveRev = (string) ($liveRev ?? '');
 
     <div class="adash-grid">
         <section class="adash-panel">
+            <?php
+            $schedule = is_array($schedule ?? null) ? $schedule : [];
+            $schedItems = is_array($schedule['items'] ?? null) ? $schedule['items'] : [];
+            $schedCounts = is_array($schedule['counts'] ?? null) ? $schedule['counts'] : [];
+            $schedWindow = is_array($schedule['window'] ?? null) ? $schedule['window'] : [];
+            $schedTicks = is_array($schedWindow['ticks'] ?? null) ? $schedWindow['ticks'] : [];
+            $schedNow = isset($schedWindow['now']) && $schedWindow['now'] !== null ? (float) $schedWindow['now'] : null;
+            $schedActive = [];
+            $schedPast = [];
+            foreach ($schedItems as $schedRow) {
+                if (!is_array($schedRow)) {
+                    continue;
+                }
+                if (($schedRow['state'] ?? '') === 'past') {
+                    $schedPast[] = $schedRow;
+                } else {
+                    $schedActive[] = $schedRow;
+                }
+            }
+            $schedStat = static function (string $key, string $label, string $tone) use ($schedCounts): void {
+                $count = (int) ($schedCounts[$key] ?? 0);
+                if ($count < 1) {
+                    return;
+                }
+                echo '<span class="sched-stat is-' . e($tone) . '"><strong>' . $count . '</strong> ' . e($label) . '</span>';
+            };
+            $schedItem = static function (array $row): void {
+                $state = (string) ($row['state'] ?? 'next');
+                if (!in_array($state, ['live', 'next', 'pay', 'past'], true)) {
+                    $state = 'next';
+                }
+                $badgeClass = (string) ($row['badge_class'] ?? 'badge-muted');
+                if (!in_array($badgeClass, ['badge-warn', 'badge-muted', 'badge-done', 'badge-ok'], true)) {
+                    $badgeClass = 'badge-muted';
+                }
+                ?>
+                <li class="sched-row is-<?= e($state) ?>">
+                    <time><strong><?= e((string) ($row['time'] ?? '')) ?></strong><span><?= e((string) ($row['end'] ?? '')) ?></span></time>
+                    <div class="sched-copy">
+                        <?php if (!empty($row['href'])): ?>
+                            <a href="<?= e((string) $row['href']) ?>"><?= e((string) ($row['name'] ?? 'Zákazník')) ?></a>
+                        <?php else: ?>
+                            <strong><?= e((string) ($row['name'] ?? 'Zákazník')) ?></strong>
+                        <?php endif; ?>
+                        <span><?= e((string) ($row['meta'] ?? '')) ?></span>
+                    </div>
+                    <div class="sched-side">
+                        <span class="badge <?= e($badgeClass) ?>"><?= e((string) ($row['badge'] ?? '')) ?></span>
+                        <?php if (!empty($row['cancel_url'])): ?>
+                            <button
+                                type="button"
+                                class="btn btn-danger btn-sm"
+                                data-cust-open="cancel-reservation"
+                                data-name="<?= e((string) ($row['cancel_name'] ?? $row['name'] ?? '')) ?>"
+                                data-action="<?= e((string) $row['cancel_url']) ?>"
+                            >Zrušit</button>
+                        <?php endif; ?>
+                    </div>
+                </li>
+                <?php
+            };
+            ?>
             <div class="adash-panel-head">
                 <div>
                     <p class="eyebrow">DNES</p>
                     <h2>Harmonogram</h2>
                 </div>
-                <span class="badge badge-muted" data-dash-schedule-count><?= count($todayList) ?></span>
+                <a class="sched-more" href="<?= e(url('/user/sprava/rezervace')) ?>">Všechny</a>
             </div>
             <div data-dash-schedule-body>
-            <?php if ($occupied && $reservation): ?>
-                <div class="adash-now">
-                    <span class="eyebrow">PRÁVĚ TEĎ</span>
-                    <strong><?= e($guestName !== '' ? $guestName : 'Zákazník') ?></strong>
-                    <span><?= e($slotLabel !== '' ? $slotLabel : 'Probíhající termín') ?></span>
-                </div>
-            <?php endif; ?>
-            <?php if ($todayList === []): ?>
-                <p class="adash-empty">Dnes žádné rezervace.<?= $nextLabel !== '' ? ' Další termín ' . e($nextLabel) . '.' : '' ?></p>
+            <?php if ($schedItems === []): ?>
+                <p class="adash-empty"><?= e((string) ($schedule['empty'] ?? 'Dnes žádné rezervace.')) ?></p>
             <?php else: ?>
-                <ul class="adash-timeline">
-                    <?php foreach ($todayList as $row): ?>
-                        <?php
-                        $rs = \App\Support\Clock::toLocal((string) $row['starts_at']);
-                        $re = $blockEnd((string) $row['ends_at'], $row['buffer_minutes'] ?? 15);
-                        $endClock = $re->format('Y-m-d') === $rs->format('Y-m-d') ? $re->format('H:i') : $re->format('j. n. H:i');
-                        $name = trim((string) (($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? '')));
-                        if ($name === '') {
-                            $name = (string) ($row['username'] ?? 'Zákazník');
-                        }
-                        $isLive = $occupied && $reservation && (int) ($reservation['id'] ?? 0) === (int) ($row['id'] ?? 0);
-                        $isPast = $re < $nowLocal;
-                        $pending = ($row['status'] ?? '') === 'pending_payment';
-                        ?>
-                        <li class="adash-tl<?= $isLive ? ' is-live' : ($isPast ? ' is-past' : '') ?>">
-                            <time><?= e($rs->format('H:i')) ?><span>–<?= e($endClock) ?></span></time>
-                            <div>
-                                <?php if (!empty($row['user_public_id'])): ?>
-                                    <a href="<?= e(url('/user/sprava/zakaznici/' . $row['user_public_id'])) ?>"><?= e($name) ?></a>
-                                <?php else: ?>
-                                    <strong><?= e($name) ?></strong>
-                                <?php endif; ?>
-                                <span><?= e((string) ($row['room_name'] ?? 'Studio')) ?><?= $pending ? ' · čeká na platbu' : '' ?></span>
-                            </div>
-                            <div class="adash-tl-side">
-                            <?php if ($isLive): ?>
-                                <span class="badge badge-warn">Teď</span>
-                            <?php elseif ($pending): ?>
-                                <span class="badge badge-muted">Platba</span>
-                            <?php elseif ($isPast): ?>
-                                <span class="badge badge-done">Hotovo</span>
-                            <?php else: ?>
-                                <span class="badge badge-ok">Čeká</span>
+                <div class="sched">
+                    <div class="sched-stats">
+                        <?php $schedStat('live', 'teď', 'live'); ?>
+                        <?php $schedStat('next', 'čeká', 'next'); ?>
+                        <?php $schedStat('pay', 'platba', 'pay'); ?>
+                        <?php $schedStat('past', 'hotovo', 'past'); ?>
+                    </div>
+                    <div class="sched-rail" aria-hidden="true">
+                        <div class="sched-rail-labels">
+                            <?php foreach ($schedTicks as $tick): ?>
+                                <?php if (!is_array($tick)) { continue; } ?>
+                                <?php $edge = (string) ($tick['edge'] ?? ''); ?>
+                                <span class="<?= $edge === 'start' ? 'is-start' : ($edge === 'end' ? 'is-end' : '') ?>" style="left: <?= e((string) ($tick['left'] ?? 0)) ?>%"><?= e((string) ($tick['label'] ?? '')) ?></span>
+                            <?php endforeach; ?>
+                        </div>
+                        <div class="sched-rail-track">
+                            <?php if ($schedNow !== null): ?>
+                                <i class="sched-rail-elapsed" style="width: <?= e((string) $schedNow) ?>%"></i>
                             <?php endif; ?>
-                            <?php if (in_array((string) ($row['status'] ?? ''), ['confirmed', 'pending_payment'], true) && !empty($row['public_id'])): ?>
-                                <button
-                                    type="button"
-                                    class="btn btn-danger btn-sm"
-                                    data-cust-open="cancel-reservation"
-                                    data-name="<?= e($name . ' · ' . $rs->format('H:i') . '–' . $endClock) ?>"
-                                    data-action="<?= e(url('/user/sprava/rezervace/' . $row['public_id'] . '/zrusit')) ?>"
-                                >Zrušit</button>
+                            <?php foreach ($schedTicks as $tick): ?>
+                                <?php if (!is_array($tick)) { continue; } ?>
+                                <?php $tickEdge = (string) ($tick['edge'] ?? ''); ?>
+                                <i class="sched-tick<?= $tickEdge === 'start' ? ' is-start' : ($tickEdge === 'end' ? ' is-end' : '') ?>" style="left: <?= e((string) ($tick['left'] ?? 0)) ?>%"></i>
+                            <?php endforeach; ?>
+                            <?php foreach ($schedItems as $mark): ?>
+                                <?php if (!is_array($mark)) { continue; } ?>
+                                <?php $markState = (string) ($mark['state'] ?? 'next'); ?>
+                                <i class="sched-mark is-<?= e(in_array($markState, ['live', 'next', 'pay', 'past'], true) ? $markState : 'next') ?>" style="left: <?= e((string) ($mark['left'] ?? 0)) ?>%; width: <?= e((string) ($mark['width'] ?? 2)) ?>%"></i>
+                            <?php endforeach; ?>
+                            <?php if ($schedNow !== null): ?>
+                                <i class="sched-now" style="left: <?= e((string) $schedNow) ?>%"></i>
                             <?php endif; ?>
-                            </div>
-                        </li>
-                    <?php endforeach; ?>
-                </ul>
+                        </div>
+                    </div>
+                    <?php if ($schedActive !== []): ?>
+                        <ul class="sched-list">
+                            <?php foreach ($schedActive as $row) { $schedItem($row); } ?>
+                        </ul>
+                    <?php endif; ?>
+                    <?php if ($schedPast !== []): ?>
+                        <details class="sched-done"<?= $schedActive === [] ? ' open' : '' ?>>
+                            <summary>Hotovo <span><?= count($schedPast) ?></span></summary>
+                            <ul class="sched-list is-done">
+                                <?php foreach ($schedPast as $row) { $schedItem($row); } ?>
+                            </ul>
+                        </details>
+                    <?php endif; ?>
+                </div>
             <?php endif; ?>
             </div>
         </section>

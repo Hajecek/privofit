@@ -33,6 +33,7 @@ final class AdminController extends Controller
             'title' => 'Přehled správy',
             'stats' => $loaded['stats'],
             'chart' => $loaded['chart'],
+            'schedule' => $live['schedule'],
             'liveRev' => $this->dashboardRevision($live),
             'pageScripts' => ['js/rev-charts.js', 'js/admin-dash.js', 'js/customers.js'],
         ]);
@@ -69,7 +70,7 @@ final class AdminController extends Controller
              WHERE r.starts_at >= :a AND r.starts_at < :b
                AND r.status IN ('confirmed', 'pending_payment')
              ORDER BY r.starts_at ASC
-             LIMIT 20",
+             LIMIT 48",
             ['a' => $todayStart, 'b' => $todayEnd]
         );
 
@@ -200,32 +201,68 @@ final class AdminController extends Controller
             $publicId = (string) ($row['user_public_id'] ?? '');
             $reservationId = (string) ($row['public_id'] ?? '');
             $canCancel = in_array((string) ($row['status'] ?? ''), ['confirmed', 'pending_payment'], true) && $reservationId !== '';
+            $startMin = $this->minutesOfDay($rs);
+            $endMin = $this->minutesOfDay($re);
+            if ($re->format('Y-m-d') !== $rs->format('Y-m-d')) {
+                $endMin += 1440;
+            }
             if ($isLive) {
+                $state = 'live';
                 $badge = 'Teď';
                 $badgeClass = 'badge-warn';
             } elseif ($pending) {
+                $state = 'pay';
                 $badge = 'Platba';
                 $badgeClass = 'badge-muted';
             } elseif ($isPast) {
+                $state = 'past';
                 $badge = 'Hotovo';
                 $badgeClass = 'badge-done';
             } else {
+                $state = 'next';
                 $badge = 'Čeká';
                 $badgeClass = 'badge-ok';
             }
+            $guests = max(1, (int) ($row['guest_count'] ?? 1));
+            $meta = array_values(array_filter([
+                (string) ($row['room_name'] ?? 'Studio'),
+                $this->durationLabel(max(0, $endMin - $startMin)),
+                $guests > 1 ? $guests . ' os.' : '',
+            ], static fn (string $part): bool => $part !== ''));
             $items[] = [
                 'time' => $rs->format('H:i'),
                 'end' => $endClock,
                 'name' => $name,
                 'href' => $publicId !== '' ? url('/user/sprava/zakaznici/' . $publicId) : '',
-                'meta' => (string) ($row['room_name'] ?? 'Studio') . ($pending ? ' · čeká na platbu' : ''),
+                'meta' => implode(' · ', $meta),
+                'state' => $state,
                 'live' => $isLive,
                 'past' => $isPast,
+                'start_min' => $startMin,
+                'end_min' => $endMin,
                 'badge' => $badge,
                 'badge_class' => $badgeClass,
                 'cancel_url' => $canCancel ? url('/user/sprava/rezervace/' . $reservationId . '/zrusit') : '',
                 'cancel_name' => $name . ' · ' . $rs->format('H:i') . '–' . $endClock,
             ];
+        }
+
+        $window = $this->scheduleWindow($items, $nowLocal);
+        $span = max(1, (int) $window['span']);
+        $fromMin = (int) $window['from'];
+        foreach ($items as $index => $item) {
+            $left = (((int) $item['start_min'] - $fromMin) / $span) * 100;
+            $width = (((int) $item['end_min'] - (int) $item['start_min']) / $span) * 100;
+            $left = round(max(0, min(100, $left)), 2);
+            $items[$index]['left'] = $left;
+            $items[$index]['width'] = round(max(1.4, min(100 - $left, $width)), 2);
+        }
+        $counts = ['live' => 0, 'next' => 0, 'pay' => 0, 'past' => 0];
+        foreach ($items as $item) {
+            $state = (string) ($item['state'] ?? '');
+            if (isset($counts[$state])) {
+                $counts[$state]++;
+            }
         }
 
         $notices = [];
@@ -324,10 +361,8 @@ final class AdminController extends Controller
             ],
             'schedule' => [
                 'count' => count($items),
-                'now' => ($occupied && $reservation) ? [
-                    'name' => $guestName !== '' ? $guestName : 'Zákazník',
-                    'slot' => $slotLabel !== '' ? $slotLabel : 'Probíhající termín',
-                ] : null,
+                'counts' => $counts,
+                'window' => $window,
                 'empty' => $items === []
                     ? 'Dnes žádné rezervace.' . ($nextLabel !== '' ? ' Další termín ' . $nextLabel . '.' : '')
                     : '',
@@ -349,6 +384,90 @@ final class AdminController extends Controller
     private function blockEnd(string $endsAt, mixed $buffer): \DateTimeImmutable
     {
         return Clock::toLocal($endsAt)->modify('+' . max(0, (int) $buffer) . ' minutes');
+    }
+
+    private function minutesOfDay(\DateTimeImmutable $time): int
+    {
+        return ((int) $time->format('G')) * 60 + (int) $time->format('i');
+    }
+
+    private function durationLabel(int $minutes): string
+    {
+        $hours = intdiv(max(0, $minutes), 60);
+        $rest = max(0, $minutes) % 60;
+        if ($hours === 0) {
+            return $rest . ' min';
+        }
+        if ($rest === 0) {
+            return $hours . ' h';
+        }
+        return $hours . ' h ' . $rest . ' min';
+    }
+
+    /**
+     * @param list<array<string, mixed>> $items
+     * @return array{from: int, to: int, span: int, now: float|null, ticks: list<array{label: string, left: float, edge: string}>}
+     */
+    private function scheduleWindow(array $items, \DateTimeImmutable $now): array
+    {
+        $nowMin = $this->minutesOfDay($now);
+        if ($items === []) {
+            return ['from' => 0, 'to' => 0, 'span' => 1, 'now' => null, 'ticks' => []];
+        }
+        $from = $nowMin;
+        $to = $nowMin;
+        foreach ($items as $item) {
+            $from = min($from, (int) ($item['start_min'] ?? $nowMin));
+            $to = max($to, (int) ($item['end_min'] ?? $nowMin));
+        }
+        $from = intdiv($from, 60) * 60;
+        $to = (int) (ceil($to / 60) * 60);
+        if ($to <= $from) {
+            $to = $from + 60;
+        }
+        if ($to - $from < 240) {
+            $pad = 240 - ($to - $from);
+            $from = max(0, $from - intdiv($pad, 2));
+            $to = $from + 240;
+            if ($to > 1440) {
+                $to = 1440;
+                $from = 1200;
+            }
+        }
+        $span = max(1, $to - $from);
+        $step = $span <= 240 ? 60 : ($span <= 480 ? 120 : ($span <= 720 ? 180 : 240));
+        $ticks = [];
+        for ($minute = $from; $minute <= $to; $minute += $step) {
+            $ticks[] = [
+                'label' => sprintf('%d:%02d', intdiv($minute, 60), $minute % 60),
+                'left' => round((($minute - $from) / $span) * 100, 2),
+                'edge' => '',
+            ];
+        }
+        $lastLeft = $ticks === [] ? -1 : (float) $ticks[array_key_last($ticks)]['left'];
+        if ($lastLeft < 99) {
+            $ticks[] = [
+                'label' => sprintf('%d:%02d', intdiv($to, 60), $to % 60),
+                'left' => 100,
+                'edge' => '',
+            ];
+        }
+        if ($ticks !== []) {
+            $ticks[0]['edge'] = 'start';
+            $ticks[array_key_last($ticks)]['edge'] = count($ticks) === 1 ? 'only' : 'end';
+        }
+        $nowLeft = null;
+        if ($nowMin >= $from && $nowMin <= $to) {
+            $nowLeft = round((($nowMin - $from) / $span) * 100, 2);
+        }
+
+        return [
+            'from' => $from,
+            'to' => $to,
+            'span' => $span,
+            'now' => $nowLeft,
+            'ticks' => $ticks,
+        ];
     }
 
     /** @return list<array<string, mixed>> */
