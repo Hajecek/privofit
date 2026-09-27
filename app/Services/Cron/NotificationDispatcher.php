@@ -200,7 +200,8 @@ final class NotificationDispatcher
         $template = (string) ($payload['template'] ?? 'generic');
         $title = (string) ($payload['subject'] ?? 'PRIVOFIT');
         $body = (string) ($payload['body'] ?? '');
-        if ($email !== '') {
+        if ($email !== '' && empty($payload['skip_email'])) {
+            unset($payload['skip_email']);
             $this->mail->queue($template, $email, $payload, $userId);
         }
         $this->push->notify($userId, $template, $title, $body, (string) ($payload['push_type'] ?? 'account.sync'));

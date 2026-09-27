@@ -12,7 +12,7 @@ use App\Services\Cron\NotificationDispatcher;
 use App\Support\Clock;
 
 /**
- * Souhrn dnešní tržby pro administrátory.
+ * Souhrn dnešní tržby pro administrátory. Jen v aplikaci, bez e-mailu.
  * INTERVAL_MINUTES = 5 je testovací kadence (cron už běží po 5 minutách).
  * Pro jeden souhrn denně nastavte 1440.
  */
@@ -59,6 +59,7 @@ final class DailyRevenueJob implements CronJob
             null,
             [
                 'template' => 'admin-revenue',
+                'skip_email' => true,
                 'push_type' => 'admin.sync',
                 'subject' => ($count > 0 ? '💰 Dnešní tržba' : '🌱 Dnešní tržba') . ' · ' . $local->format('H:i'),
                 'body' => $this->body($amount, $count),

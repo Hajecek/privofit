@@ -341,7 +341,7 @@ final class CronNotificationTest extends TestCase
             $this->assertStringContainsString('🔥', (string) $payload['body']);
 
             $this->assertSame('dispatched', $notify->dispatchKey((string) $event['event_key']));
-            $this->assertSame(1, $this->countChannel($adminId, 'admin-revenue', 'email'));
+            $this->assertSame(0, $this->countChannel($adminId, 'admin-revenue', 'email'));
             $this->assertSame(1, $this->countChannel($adminId, 'admin-revenue', 'in_app'));
             $this->assertSame(0, $this->countNotes($customerId, 'admin-revenue'));
 
