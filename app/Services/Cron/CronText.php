@@ -25,15 +25,12 @@ final class CronText
 
     public static function link(string $path): string
     {
-        $base = rtrim((string) env_value('APP_URL', ''), '/');
-        $path = '/' . ltrim($path, '/');
-        if (preg_match('#^https?://#i', $base) === 1) {
-            return $base . $path;
-        }
         try {
-            return url($path);
+            return absolute_url($path);
         } catch (\Throwable) {
-            return $path;
+            $base = rtrim((string) env_value('APP_URL', ''), '/');
+            $path = '/' . ltrim($path, '/');
+            return $base . $path;
         }
     }
 }

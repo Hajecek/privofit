@@ -281,7 +281,7 @@
   };
   document.querySelectorAll("[data-toast]").forEach((toast) => {
     toast.querySelector("[data-toast-close]")?.addEventListener("click", () => hide(toast));
-    window.setTimeout(() => hide(toast), 3600);
+    if (!toast.hasAttribute("data-toast-stay")) window.setTimeout(() => hide(toast), 3600);
   });
 
   const presenceUrl = document.body.dataset.presence;

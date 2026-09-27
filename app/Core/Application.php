@@ -204,12 +204,24 @@ final class Application
 
     public function absoluteUrl(string $path = '/'): string
     {
+        if (!str_starts_with($path, '/')) {
+            $path = '/' . $path;
+        }
+        $configured = rtrim((string) $this->config('app.url', ''), '/');
+        if ($configured !== '' && preg_match('#^https?://#i', $configured) === 1) {
+            return $configured . ($path === '/' ? '/' : $path);
+        }
+
         $relative = $this->url($path);
         if (preg_match('#^https?://#i', $relative) === 1) {
             return $relative;
         }
-        $https = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
-        $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
+        $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https';
+        $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
+        if ($host === '') {
+            $host = 'localhost';
+        }
         return ($https ? 'https' : 'http') . '://' . $host . $relative;
     }
 

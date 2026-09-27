@@ -44,6 +44,11 @@ function url(string $path = '/'): string
     return app()->url($path);
 }
 
+function absolute_url(string $path = '/'): string
+{
+    return app()->absoluteUrl($path);
+}
+
 function asset(string $path): string
 {
     return app()->url('/assets/' . ltrim($path, '/'));
@@ -68,6 +73,30 @@ function old(string $key, mixed $default = ''): string
 function flash(string $key): ?string
 {
     return Session::pull('flash_' . $key);
+}
+
+/** @return list<array{subject:string,url:string}> */
+function mail_links(): array
+{
+    $links = Session::pull('flash_mail_links', []);
+    if (!is_array($links)) {
+        return [];
+    }
+    $clean = [];
+    foreach ($links as $link) {
+        if (!is_array($link)) {
+            continue;
+        }
+        $url = (string) ($link['url'] ?? '');
+        if (preg_match('#^https?://#i', $url) !== 1) {
+            continue;
+        }
+        $clean[] = [
+            'subject' => (string) ($link['subject'] ?? 'E-mail'),
+            'url' => $url,
+        ];
+    }
+    return $clean;
 }
 
 function auth(): Auth

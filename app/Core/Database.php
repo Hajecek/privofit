@@ -12,6 +12,9 @@ final class Database
 {
     private ?PDO $pdo = null;
 
+    /** @var list<callable(): void> */
+    private array $afterCommit = [];
+
     public function pdo(): PDO
     {
         if ($this->pdo instanceof PDO) {
@@ -104,6 +107,15 @@ final class Database
         return $this->query($sql, $data + $whereParams)->rowCount();
     }
 
+    public function afterCommit(callable $callback): void
+    {
+        if (!$this->pdo()->inTransaction()) {
+            $callback();
+            return;
+        }
+        $this->afterCommit[] = $callback;
+    }
+
     public function transaction(callable $callback): mixed
     {
         $pdo = $this->pdo();
@@ -116,13 +128,26 @@ final class Database
             $result = $callback($this);
             if ($started) {
                 $pdo->commit();
+                $this->runAfterCommit();
             }
             return $result;
         } catch (\Throwable $e) {
-            if ($started && $pdo->inTransaction()) {
-                $pdo->rollBack();
+            if ($started) {
+                $this->afterCommit = [];
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
             }
             throw $e;
+        }
+    }
+
+    private function runAfterCommit(): void
+    {
+        $hooks = $this->afterCommit;
+        $this->afterCommit = [];
+        foreach ($hooks as $hook) {
+            $hook();
         }
     }
 

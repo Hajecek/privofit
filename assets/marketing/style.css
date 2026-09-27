@@ -3599,6 +3599,46 @@ body.standalone-error .scroll-progress { display: none !important; }
   letter-spacing: .16em;
   text-transform: uppercase;
 }
+.mail-pass {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 18px;
+}
+.mail-pass-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 14px 14px 16px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--lime) 32%, transparent);
+  background: color-mix(in srgb, var(--lime) 8%, transparent);
+}
+.mail-pass-copy { min-width: 0; }
+.mail-pass-kicker {
+  margin: 0;
+  color: var(--lime);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.mail-pass-title {
+  margin: 4px 0 0;
+  color: var(--fog);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.mail-pass-go {
+  flex: 0 0 auto;
+  text-decoration: none;
+  white-space: nowrap;
+}
+@media (max-width: 520px) {
+  .mail-pass-item { flex-direction: column; align-items: stretch; }
+  .mail-pass-go { width: 100%; }
+}
 .toast p {
   margin: 0;
   color: var(--fog, #e8f0e4);

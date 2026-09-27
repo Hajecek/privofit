@@ -25,7 +25,7 @@ $hideChrome = $hideChrome ?? str_contains((string) $bodyClass, 'standalone-');
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="<?= e(url('/assets/marketing/style.css')) ?>?v=44">
+    <link rel="stylesheet" href="<?= e(url('/assets/marketing/style.css')) ?>?v=46">
     <link rel="manifest" href="<?= e(url('/manifest.json')) ?>">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -110,7 +110,7 @@ $hideChrome = $hideChrome ?? str_contains((string) $bodyClass, 'standalone-');
         <span>MADE FOR YOUR NEXT MOVE.</span>
     </div>
 </footer>
-<script nonce="<?= e($cspNonce) ?>" src="<?= e(url('/assets/marketing/app.js')) ?>?v=15"></script>
+<script nonce="<?= e($cspNonce) ?>" src="<?= e(url('/assets/marketing/app.js')) ?>?v=16"></script>
 <script type="module" nonce="<?= e($cspNonce) ?>">
 const sceneUrl = <?= json_encode(url('/assets/marketing/scene.js') . '?v=8', JSON_UNESCAPED_SLASHES) ?>;
 const decorUrl = <?= json_encode(url('/assets/marketing/decor.js') . '?v=9', JSON_UNESCAPED_SLASHES) ?>;

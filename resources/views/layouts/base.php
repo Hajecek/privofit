@@ -14,7 +14,7 @@ $bodyClass = $bodyClass ?? '';
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="<?= e(asset('user/style.css')) ?>?v=156">
+    <link rel="stylesheet" href="<?= e(asset('user/style.css')) ?>?v=158">
     <link rel="manifest" href="<?= e(url('/manifest.json')) ?>">
     <link rel="icon" href="<?= e(url('/favicon.ico')) ?>?v=3" sizes="any">
     <link rel="icon" type="image/png" sizes="32x32" href="<?= e(asset('brand/favicon-32.png')) ?>?v=3">
@@ -27,7 +27,7 @@ $bodyClass = $bodyClass ?? '';
 <body class="<?= e($bodyClass) ?>"<?php if (!empty($user)): ?> data-presence="<?= e(url('/user/pritomnost')) ?>" data-signed-out="<?= e(url('/odhlaseno')) ?>"<?php endif; ?>>
 <a class="skip-link" href="#main">Přeskočit na obsah</a>
 <?= $content ?? '' ?>
-<script nonce="<?= e($cspNonce) ?>" src="<?= e(asset('js/app.js')) ?>?v=28"></script>
+<script nonce="<?= e($cspNonce) ?>" src="<?= e(asset('js/app.js')) ?>?v=29"></script>
 <?php foreach (($pageScripts ?? []) as $src): ?>
 <script nonce="<?= e($cspNonce) ?>" src="<?= e(asset($src)) ?>?v=82"></script>
 <?php endforeach; ?>

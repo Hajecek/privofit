@@ -565,7 +565,7 @@ final class AuthService
         $this->mail->queue('verify-email', $user['email'], [
             'subject' => 'Ověření e-mailové adresy',
             'first_name' => $user['first_name'],
-            'action_url' => url('/overeni-emailu?token=' . urlencode($raw)),
+            'action_url' => absolute_url('/overeni-emailu?token=' . rawurlencode($raw)),
         ], (int) $user['id']);
     }
 
@@ -608,7 +608,7 @@ final class AuthService
         $this->mail->queue('reset-password', $user['email'], [
             'subject' => 'Obnovení hesla',
             'first_name' => $user['first_name'],
-            'action_url' => url('/obnoveni-hesla?token=' . urlencode($raw)),
+            'action_url' => absolute_url('/obnoveni-hesla?token=' . rawurlencode($raw)),
         ], (int) $user['id']);
     }
 
@@ -686,7 +686,8 @@ final class AuthService
         $this->mail->queue('verify-email', $newEmail, [
             'subject' => 'Potvrzení nové e-mailové adresy',
             'first_name' => $user['first_name'],
-            'action_url' => url('/potvrzeni-emailu?token=' . urlencode($raw)),
+            'body' => 'Potvrď novou e-mailovou adresu tlačítkem níže. Odkaz platí 60 minut.',
+            'action_url' => absolute_url('/potvrzeni-emailu?token=' . rawurlencode($raw)),
         ], (int) $user['id']);
     }
 

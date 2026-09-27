@@ -323,13 +323,14 @@ final class AuthController extends Controller
 
     public function confirmEmailChange(Request $request): never
     {
+        $next = $this->app->auth()->check() ? '/user/profil' : '/prihlaseni';
         try {
             $this->authService()->confirmEmailChange((string) $request->query('token', ''));
         } catch (HttpException $e) {
             $this->flashError($e->getMessage());
-            $this->redirect('/user/profil');
+            $this->redirect($next);
         }
-        $this->flashSuccess('E-mailová adresa byla změněna.');
-        $this->redirect('/user/profil');
+        $this->flashSuccess($next === '/prihlaseni' ? 'E-mailová adresa byla změněna. Přihlas se.' : 'E-mailová adresa byla změněna.');
+        $this->redirect($next);
     }
 }

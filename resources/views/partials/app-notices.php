@@ -1,6 +1,7 @@
 <?php
 $error = flash('error');
 $ok = flash('success');
+require __DIR__ . '/mail-links.php';
 ?>
 <?php if ($error): ?>
     <div class="toast toast-error" role="alert" data-toast>
