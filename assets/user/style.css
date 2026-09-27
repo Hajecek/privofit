@@ -5663,12 +5663,36 @@ body.user-app:has(.profile-save.is-on) .app-main { padding-bottom: 140px; }
 .profile-hero-actions form {
   display: inline-flex;
 }
+.mfa-stage.is-lock {
+  display: grid;
+  gap: 22px;
+}
+.mfa-gate-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.mfa-gate-logo {
+  width: 168px;
+  height: auto;
+}
+.mfa-simple {
+  width: min(400px, 100%);
+  margin: 0 auto;
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  text-align: center;
+}
+.mfa-intro h1 {
+  margin: 0 0 8px;
+  font-size: clamp(1.8rem, 4vw, 2.4rem);
+}
 .mfa-qr {
-  width: 236px;
-  max-width: 100%;
-  margin: 16px 0;
+  width: min(220px, 100%);
   padding: 12px;
-  border-radius: 18px;
+  border-radius: 24px;
   background: #fff;
 }
 .mfa-qr img,
@@ -5678,76 +5702,97 @@ body.user-app:has(.profile-save.is-on) .app-main { padding-bottom: 140px; }
   height: auto;
   background: #fff;
 }
-.mfa-secret {
-  margin: 0 0 12px;
-}
-.mfa-secret code {
-  font-size: 1.05rem;
-  letter-spacing: 0.08em;
-}
-.mfa-phone {
-  margin: 4px 0 18px;
-  padding-top: 4px;
-}
-.mfa-phone-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
-}
-.mfa-phone-actions .btn {
-  flex: 1 1 180px;
-}
-.mfa-phone-hint {
-  margin: 10px 0 0;
-  color: var(--secondary);
-  font-size: 13px;
-}
-.mfa-guide {
-  list-style: none;
-  margin: 0 0 16px;
-  padding: 0;
+.mfa-choices,
+.mfa-confirm {
+  width: 100%;
   display: grid;
   gap: 10px;
 }
-.mfa-guide li {
+.mfa-choice-links {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
   margin: 0;
-  padding: 14px 16px;
-  border-radius: 16px;
-  border: 1px solid var(--line);
-  background: rgba(0, 0, 0, 0.18);
 }
-.mfa-guide strong {
-  display: block;
-  margin-bottom: 4px;
-}
-.mfa-guide span {
+.mfa-choice-links a,
+.mfa-choice-links button {
   color: var(--secondary);
   font-size: 14px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
-.mfa-gate-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 22px;
+.mfa-choice-links a:hover,
+.mfa-choice-links button:hover {
+  color: var(--lime);
 }
-.mfa-gate-logo {
-  width: 180px;
-  height: auto;
+.mfa-key {
+  margin: 0;
 }
-.mfa-gate-intro {
-  margin-bottom: 18px;
+.mfa-key code {
+  font-size: 0.95rem;
+  letter-spacing: 0.12em;
 }
-.mfa-gate-intro h1 {
-  margin: 0 0 8px;
+.mfa-confirm {
+  margin-top: 6px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.mfa-confirm label {
+  font-size: 0.86rem;
+  color: var(--secondary);
+  font-weight: 600;
+}
+.mfa-confirm input {
+  width: 100%;
+  min-height: 56px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.28);
+  padding: 0 14px;
+  font-size: 1.45rem;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  text-align: center;
+}
+.mfa-confirm input:focus {
+  outline: 2px solid var(--lime);
+  border-color: transparent;
+}
+.mfa-codes {
+  list-style: none;
+  width: 100%;
+  margin: 4px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+}
+.mfa-codes li {
+  padding: 14px 8px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.22);
+}
+.mfa-codes code {
+  font-family: var(--display);
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+}
+.mfa-codes-empty {
+  margin: 8px 0;
+}
+.mfa-simple-codes .mfa-actions {
+  width: 100%;
+  display: grid;
+  gap: 8px;
 }
 body.mfa-gate .app-main {
-  width: min(1040px, calc(100% - 32px));
+  width: min(480px, calc(100% - 32px));
   max-width: none;
   margin: 0 auto;
   min-height: 100dvh;
-  padding: max(24px, env(safe-area-inset-top)) 0 40px;
+  padding: max(20px, env(safe-area-inset-top)) 0 32px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -5756,31 +5801,6 @@ body.mfa-gate .menu-toggle,
 body.mfa-gate .side-menu,
 body.mfa-gate .side-backdrop {
   display: none;
-}
-@media (min-width: 860px) {
-  .mfa-guide { grid-template-columns: repeat(3, 1fr); }
-  .mfa-setup.profile-grid {
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-    align-items: start;
-  }
-}
-.recovery-grid {
-  list-style: none;
-  margin: 0 0 18px;
-  padding: 0;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 1fr 1fr;
-}
-.recovery-grid li {
-  padding: 12px 14px;
-  border-radius: 14px;
-  border: 1px solid var(--line);
-  background: rgba(0, 0, 0, 0.18);
-}
-.recovery-grid code {
-  font-size: 1rem;
-  letter-spacing: 0.06em;
 }
 @media (max-width: 859px) {
   .stat-grid { grid-template-columns: 1fr 1fr; }
@@ -5799,7 +5819,6 @@ body.mfa-gate .side-backdrop {
     flex: 1;
     justify-content: center;
   }
-  .recovery-grid { grid-template-columns: 1fr; }
   .profile-hero,
   .profile-section { padding: 22px; }
 }
