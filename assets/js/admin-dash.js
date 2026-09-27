@@ -588,7 +588,7 @@
       fillLegend(document.querySelector("[data-chart-donut-legend]"), nextSegments, true);
       if (legend) {
         const kind = root?.querySelector("[data-chart-kind].is-on")?.getAttribute("data-chart-kind") || "line";
-        legend.hidden = kind === "line" || legend.children.length === 0;
+        legend.hidden = kind === "curve" || legend.children.length === 0;
       }
     }
     renderSchedule(data.schedule || {});

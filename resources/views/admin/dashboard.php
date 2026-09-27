@@ -167,14 +167,17 @@ $liveRev = (string) ($liveRev ?? '');
                 <p
                     class="muted"
                     data-chart-hint
-                    data-hint-line="Posledních 30 dní · klikni na den"
+                    data-hint-curve="Hladká křivka · klikni na den"
                     data-hint-area="Plochy podle tarifu · klikni na den"
                     data-hint-bar="Sloupce podle tarifu · klikni na den"
-                >Posledních 30 dní · klikni na den</p>
+                    data-hint-ring="Podíl tarifů"
+                >Hladká křivka · klikni na den</p>
             </div>
-            <div class="adash-chart-actions">
-                <a class="btn btn-secondary" href="<?= e(url('/user/sprava/trzby?obdobi=dnes')) ?>">Dnes</a>
-                <a class="btn btn-primary" href="<?= e(url('/user/sprava/trzby')) ?>">Detail tržeb</a>
+            <div class="chart-kind" role="tablist" aria-label="Typ grafu">
+                <button type="button" class="chart-kind-btn is-on" role="tab" data-chart-kind="curve" aria-selected="true">Křivka</button>
+                <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="area" aria-selected="false">Plocha</button>
+                <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="bar" aria-selected="false">Sloupce</button>
+                <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="ring" aria-selected="false">Kruh</button>
             </div>
         </div>
 
@@ -189,12 +192,7 @@ $liveRev = (string) ($liveRev ?? '');
                 ?>
                 <li><i style="background:<?= e($segmentColor) ?>"></i><?= e((string) ($segment['label'] ?? '')) ?></li>
             <?php endforeach; ?>
-        </ul>
-            <div class="chart-kind" role="tablist" aria-label="Typ grafu">
-                <button type="button" class="chart-kind-btn is-on" role="tab" data-chart-kind="line" aria-selected="true">Čára</button>
-                <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="area" aria-selected="false">Plocha</button>
-                <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="bar" aria-selected="false">Sloupce</button>
-            </div>
+            </ul>
         </div>
         <div class="adash-chart-stage">
             <canvas data-dash-line width="800" height="260" aria-label="Vývoj tržeb"></canvas>

@@ -142,7 +142,8 @@
     const tip = opts.tipEl || null;
     const onSelect = typeof opts.onSelect === "function" ? opts.onSelect : null;
 
-    const findIndex = (clientX) => {
+    const findIndex = (clientX, clientY) => {
+      if (typeof state.hit === "function") return state.hit(clientX, clientY);
       const rect = canvas.getBoundingClientRect();
       const x = clientX - rect.left;
       for (let i = 0; i < state.bars.length; i++) {
@@ -157,7 +158,7 @@
         return;
       }
       tip.hidden = false;
-      tip.innerHTML = tipMarkup(state.bars[i].day, opts.segments, opts);
+      tip.innerHTML = state.bars[i].tip || tipMarkup(state.bars[i].day, opts.segments, opts);
       const parent = tip.offsetParent || document.body;
       const prect = parent.getBoundingClientRect();
       const tipW = tip.offsetWidth || 168;
@@ -166,7 +167,7 @@
     };
 
     const onMove = (event) => {
-      const i = findIndex(event.clientX);
+      const i = findIndex(event.clientX, event.clientY);
       if (i !== state.hover) {
         state.hover = i;
         state.paint();
@@ -181,8 +182,9 @@
     };
 
     const onClick = (event) => {
-      const i = findIndex(event.clientX);
-      if (i >= 0 && state.bars[i] && onSelect) onSelect(state.bars[i].day);
+      const i = findIndex(event.clientX, event.clientY);
+      const hit = i >= 0 ? state.bars[i] : null;
+      if (hit && hit.day && hit.selectable !== false && onSelect) onSelect(hit.day);
     };
 
     const onResize = () => state.paint();
@@ -558,22 +560,316 @@
     };
   };
 
+  const monotoneTangents = (values) => {
+    const n = values.length;
+    const slope = new Array(Math.max(0, n - 1));
+    const tangent = new Array(n).fill(0);
+    for (let i = 0; i < n - 1; i++) slope[i] = values[i + 1] - values[i];
+    if (n < 2) return tangent;
+    tangent[0] = slope[0];
+    tangent[n - 1] = slope[n - 2];
+    for (let i = 1; i < n - 1; i++) {
+      tangent[i] = slope[i - 1] * slope[i] <= 0 ? 0 : (slope[i - 1] + slope[i]) / 2;
+    }
+    for (let i = 0; i < n - 1; i++) {
+      if (slope[i] === 0) {
+        tangent[i] = 0;
+        tangent[i + 1] = 0;
+        continue;
+      }
+      const a = tangent[i] / slope[i];
+      const b = tangent[i + 1] / slope[i];
+      const hypot = a * a + b * b;
+      if (hypot > 9) {
+        const scale = 3 / Math.sqrt(hypot);
+        tangent[i] = scale * a * slope[i];
+        tangent[i + 1] = scale * b * slope[i];
+      }
+    }
+    return tangent;
+  };
+
+  const strokeCurve = (ctx, points, tangents) => {
+    if (points.length === 0) return;
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 0; i < points.length - 1; i++) {
+      const from = points[i];
+      const to = points[i + 1];
+      const span = (to.x - from.x) / 3;
+      ctx.bezierCurveTo(
+        from.x + span,
+        from.y + tangents[i] / 3,
+        to.x - span,
+        to.y - tangents[i + 1] / 3,
+        to.x,
+        to.y
+      );
+    }
+  };
+
+  const drawCurveChart = (canvas, days, opts = {}) => {
+    if (!canvas || !Array.isArray(days) || days.length === 0) return null;
+    const accent = opts.accent || "#c6f21a";
+    const soft = opts.soft || "rgba(198, 242, 26, 0.2)";
+    const state = { hover: -1, bars: [], paint: () => {} };
+    let reveal = wantsMotion(canvas, "curve", opts) ? 0 : 1;
+    let binding = null;
+    let alive = true;
+
+    const paint = () => {
+      const { ctx, w, h } = fitCanvas(canvas);
+      ctx.clearRect(0, 0, w, h);
+
+      const pad = { t: 18, r: 12, b: 28, l: 8 };
+      const plotW = w - pad.l - pad.r;
+      const plotH = h - pad.t - pad.b;
+      const max = Math.max(...days.map((day) => dayTotal(day, opts.segments)), 1);
+      const step = plotW / Math.max(days.length, 1);
+      const base = pad.t + plotH;
+      state.bars = [];
+
+      drawGrid(ctx, w, pad, plotH);
+
+      const points = days.map((day, i) => {
+        const amount = dayTotal(day, opts.segments);
+        const x = pad.l + step * i + step / 2;
+        const y = pad.t + plotH - (amount / max) * plotH;
+        state.bars.push({ i, x, y, left: pad.l + step * i, right: pad.l + step * (i + 1), day });
+        return { x, y, amount };
+      });
+      const tangents = monotoneTangents(points.map((point) => point.amount)).map((slope) => (-slope / max) * plotH);
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, pad.l + plotW * reveal, h);
+      ctx.clip();
+
+      const grad = ctx.createLinearGradient(0, pad.t, 0, base);
+      grad.addColorStop(0, soft);
+      grad.addColorStop(1, "rgba(198, 242, 26, 0)");
+      ctx.beginPath();
+      strokeCurve(ctx, points, tangents);
+      ctx.lineTo(points[points.length - 1].x, base);
+      ctx.lineTo(points[0].x, base);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      ctx.beginPath();
+      strokeCurve(ctx, points, tangents);
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 2.4;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.stroke();
+      ctx.restore();
+
+      drawDayLabels(ctx, days, pad, step, h);
+
+      if (state.hover >= 0 && state.bars[state.hover]) {
+        const hit = state.bars[state.hover];
+        ctx.strokeStyle = "rgba(232, 240, 228, 0.2)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(hit.x, pad.t);
+        ctx.lineTo(hit.x, base);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(hit.x, hit.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = accent;
+        ctx.fill();
+        ctx.strokeStyle = "#0b1210";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+    };
+
+    state.paint = paint;
+    binding = bindPlot(canvas, state, opts);
+
+    if (reveal >= 1) {
+      paint();
+    } else {
+      const start = performance.now();
+      const tick = (now) => {
+        if (!alive) return;
+        const t = Math.min(1, (now - start) / 920);
+        reveal = easeOut(t);
+        paint();
+        if (t < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }
+
+    return {
+      redraw: paint,
+      destroy: () => {
+        alive = false;
+        if (binding) binding.destroy();
+      },
+    };
+  };
+
+  const ringParts = (days, segments) => {
+    const source = Array.isArray(segments) && segments.length ? segments : SERIES;
+    const totals = source.map((series) => ({
+      key: series.key,
+      label: series.label || "",
+      color: safeColor(series.color),
+      value: 0,
+    }));
+    (Array.isArray(days) ? days : []).forEach((day) => {
+      partsFor(day, segments).forEach((part) => {
+        const slot = totals.find((item) => item.key === part.key);
+        if (slot) slot.value += part.value;
+      });
+    });
+    if (totals.every((item) => item.value <= 0)) {
+      source.forEach((series, index) => {
+        if (totals[index]) totals[index].value = Number(series.amount) || 0;
+      });
+    }
+    return totals.filter((item) => item.value > 0);
+  };
+
+  const drawRingChart = (canvas, days, opts = {}) => {
+    if (!canvas) return null;
+    const countMode = opts.format === "count";
+    const format = countMode ? formatCount : formatMoney;
+    const state = { hover: -1, bars: [], paint: () => {}, hit: () => -1 };
+    let reveal = wantsMotion(canvas, "ring", opts) ? 0 : 1;
+    let binding = null;
+    let alive = true;
+
+    const paint = () => {
+      const { ctx, w, h } = fitCanvas(canvas);
+      ctx.clearRect(0, 0, w, h);
+      const parts = ringParts(days, opts.segments);
+      const total = parts.reduce((sum, part) => sum + part.value, 0);
+      const cx = w / 2;
+      const cy = h / 2;
+      const outer = Math.min(w, h) * 0.38;
+      const inner = outer * 0.62;
+      const tau = Math.PI * 2;
+      const gap = parts.length > 1 ? 0.04 : 0;
+      state.bars = [];
+      let cursor = 0;
+      parts.forEach((part, index) => {
+        const share = total > 0 ? part.value / total : 0;
+        const sweep = share * tau;
+        const start = cursor;
+        const end = cursor + Math.max(0, sweep - gap);
+        cursor += sweep;
+        const pct = total > 0 ? Math.round(share * 100) : 0;
+        state.bars.push({
+          i: index,
+          a0: start,
+          a1: end,
+          selectable: false,
+          tip: "<strong>" + esc(format(part.value)) + "</strong><span>" + esc(part.label) + " · " + pct + " %</span>",
+        });
+      });
+      state.hit = (clientX, clientY) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = clientX - rect.left - cx;
+        const y = clientY - rect.top - cy;
+        const dist = Math.hypot(x, y);
+        if (dist < inner * 0.92 || dist > outer * 1.14) return -1;
+        let angle = Math.atan2(y, x) + Math.PI / 2;
+        angle = ((angle % tau) + tau) % tau;
+        for (let i = 0; i < state.bars.length; i++) {
+          if (angle >= state.bars[i].a0 && angle <= state.bars[i].a1 + 0.02) return i;
+        }
+        return -1;
+      };
+
+      if (parts.length === 0) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, (outer + inner) / 2, 0, tau);
+        ctx.strokeStyle = "rgba(232, 240, 228, 0.14)";
+        ctx.lineWidth = outer - inner;
+        ctx.stroke();
+        return;
+      }
+
+      const limit = Math.max(0, Math.min(1, reveal)) * tau;
+      parts.forEach((part, index) => {
+        const slice = state.bars[index];
+        const visibleEnd = Math.min(slice.a1, limit);
+        if (visibleEnd <= slice.a0) return;
+        const hover = state.hover === index;
+        const mid = -Math.PI / 2 + (slice.a0 + slice.a1) / 2;
+        const push = hover ? 7 : 0;
+        const ox = Math.cos(mid) * push;
+        const oy = Math.sin(mid) * push;
+        const a0 = -Math.PI / 2 + slice.a0;
+        const a1 = -Math.PI / 2 + visibleEnd;
+        ctx.beginPath();
+        ctx.arc(cx + ox, cy + oy, hover ? outer + 3 : outer, a0, a1);
+        ctx.arc(cx + ox, cy + oy, inner, a1, a0, true);
+        ctx.closePath();
+        ctx.fillStyle = part.color;
+        ctx.fill();
+      });
+
+      ctx.fillStyle = "#e8f0e4";
+      ctx.font = "800 " + Math.max(15, Math.round(inner * 0.32)) + "px Syne, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(format(total), cx, cy - 8);
+      ctx.fillStyle = "rgba(232, 240, 228, 0.55)";
+      ctx.font = "700 11px Figtree, sans-serif";
+      ctx.fillText("celkem", cx, cy + 16);
+    };
+
+    state.paint = paint;
+    binding = bindPlot(canvas, state, opts);
+
+    if (reveal >= 1) {
+      paint();
+    } else {
+      const start = performance.now();
+      const tick = (now) => {
+        if (!alive) return;
+        const t = Math.min(1, (now - start) / 780);
+        reveal = easeOut(t);
+        paint();
+        if (t < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }
+
+    return {
+      redraw: paint,
+      destroy: () => {
+        alive = false;
+        if (binding) binding.destroy();
+      },
+    };
+  };
+
+  const chartKinds = ["curve", "area", "bar", "ring"];
+  const normalizeKind = (value) => {
+    if (value === "line") return "curve";
+    return chartKinds.includes(value) ? value : "curve";
+  };
+
   const mountSeriesChart = (root, canvas, initialDays, initialOpts = {}) => {
     if (!root || !canvas) return null;
     const buttons = Array.from(root.querySelectorAll("[data-chart-kind]"));
     const legend = root.querySelector("[data-chart-legend]");
     const hint = root.querySelector("[data-chart-hint]");
     const storageKey = initialOpts.storageKey || "privofit.chartKind";
-    let kind = initialOpts.kind === "bar" || initialOpts.kind === "area" || initialOpts.kind === "line" ? initialOpts.kind : "line";
+    let kind = normalizeKind(initialOpts.kind);
     let handle = null;
     let days = initialDays;
     let opts = initialOpts;
 
     try {
       const saved = localStorage.getItem(storageKey);
-      if (saved === "bar" || saved === "line" || saved === "area") kind = saved;
+      if (saved) kind = normalizeKind(saved);
     } catch {
-      kind = "line";
+      kind = "curve";
     }
 
     const applyChrome = () => {
@@ -582,30 +878,36 @@
         btn.classList.toggle("is-on", on);
         btn.setAttribute("aria-selected", on ? "true" : "false");
       });
-      if (legend) legend.hidden = kind === "line" || legend.children.length === 0;
+      if (legend) legend.hidden = kind === "curve" || legend.children.length === 0;
       if (hint) {
-        const hintName = kind === "bar" ? "data-hint-bar" : kind === "area" ? "data-hint-area" : "data-hint-line";
+        const hintName = {
+          bar: "data-hint-bar",
+          area: "data-hint-area",
+          curve: "data-hint-curve",
+          ring: "data-hint-ring",
+        }[kind] || "data-hint-curve";
         const next = hint.getAttribute(hintName);
         if (next) hint.textContent = next;
       }
       const aria = opts.subject
         ? {
-            line: "Vývoj " + opts.subject,
+            curve: "Křivka " + opts.subject,
+            ring: "Kruhový graf " + opts.subject,
             area: "Plošný graf " + opts.subject,
             bar: "Sloupcový graf " + opts.subject,
           }
-        : { line: "Vývoj tržeb", area: "Plošný graf tržeb", bar: "Sloupcový graf tržeb" };
-      canvas.setAttribute("aria-label", aria[kind] || aria.line);
+        : { curve: "Křivka tržeb", ring: "Kruhový graf tržeb", area: "Plošný graf tržeb", bar: "Sloupcový graf tržeb" };
+      canvas.setAttribute("aria-label", aria[kind] || aria.curve);
     };
 
     const draw = (animate) => {
       if (handle && handle.destroy) handle.destroy();
-      const painters = { line: drawLineChart, area: drawAreaChart, bar: drawBarChart };
-      handle = (painters[kind] || drawLineChart)(canvas, days, { ...opts, animate });
+      const painters = { curve: drawCurveChart, ring: drawRingChart, area: drawAreaChart, bar: drawBarChart };
+      handle = (painters[kind] || drawCurveChart)(canvas, days, { ...opts, animate });
     };
 
     const setKind = (next) => {
-      const resolved = next === "bar" || next === "area" ? next : "line";
+      const resolved = normalizeKind(next);
       if (resolved === kind && handle) return;
       kind = resolved;
       applyChrome();
@@ -766,5 +1068,5 @@
     playIntro(canvas, render, 780);
   };
 
-  window.PrivofitCharts = { drawLineChart, drawAreaChart, drawBarChart, drawDonut, mountSeriesChart, formatMoney, parsePayload };
+  window.PrivofitCharts = { drawLineChart, drawCurveChart, drawRingChart, drawAreaChart, drawBarChart, drawDonut, mountSeriesChart, formatMoney, parsePayload };
 })();

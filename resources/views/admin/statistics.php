@@ -117,9 +117,10 @@ $safeColor = static function (string $color): string {
                 <?php endforeach; ?>
             </ul>
             <div class="chart-kind" role="tablist" aria-label="Typ grafu návštěvnosti">
-                <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="line" aria-selected="false">Čára</button>
+                <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="curve" aria-selected="false">Křivka</button>
                 <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="area" aria-selected="false">Plocha</button>
                 <button type="button" class="chart-kind-btn is-on" role="tab" data-chart-kind="bar" aria-selected="true">Sloupce</button>
+                <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="ring" aria-selected="false">Kruh</button>
             </div>
         </div>
         <div class="adash-chart-stage">
@@ -143,9 +144,10 @@ $safeColor = static function (string $color): string {
                     <p
                         class="muted"
                         data-chart-hint
-                        data-hint-line="<?= (int) ($report['payment_count'] ?? 0) ?> plateb · průměr <?= e((string) ($report['per_payment'] ?? '0 Kč')) ?> · klik otevře den"
+                        data-hint-curve="<?= (int) ($report['payment_count'] ?? 0) ?> plateb · průměr <?= e((string) ($report['per_payment'] ?? '0 Kč')) ?> · klik otevře den"
                         data-hint-area="Plochy podle tarifu · klik otevře den"
                         data-hint-bar="Sloupce podle tarifu · klik otevře den"
+                        data-hint-ring="Podíl tarifů"
                     ><?= (int) ($report['payment_count'] ?? 0) ?> plateb · průměr <?= e((string) ($report['per_payment'] ?? '0 Kč')) ?></p>
                 </div>
             </div>
@@ -156,9 +158,10 @@ $safeColor = static function (string $color): string {
                     <?php endforeach; ?>
                 </ul>
                 <div class="chart-kind" role="tablist" aria-label="Typ grafu tržeb">
-                    <button type="button" class="chart-kind-btn is-on" role="tab" data-chart-kind="line" aria-selected="true">Čára</button>
+                    <button type="button" class="chart-kind-btn is-on" role="tab" data-chart-kind="curve" aria-selected="true">Křivka</button>
                     <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="area" aria-selected="false">Plocha</button>
                     <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="bar" aria-selected="false">Sloupce</button>
+                    <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="ring" aria-selected="false">Kruh</button>
                 </div>
             </div>
             <div class="adash-chart-stage">

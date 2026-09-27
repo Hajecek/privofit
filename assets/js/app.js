@@ -139,6 +139,32 @@
     });
   });
 
+  document.querySelectorAll("[data-qr-save]").forEach((btn) => {
+    btn.addEventListener("click", async (event) => {
+      if (!navigator.share || !btn.href) return;
+      event.preventDefault();
+      const previous = btn.textContent;
+      try {
+        const response = await fetch(btn.href, { credentials: "same-origin", cache: "no-store" });
+        if (!response.ok) throw new Error("qr");
+        const blob = await response.blob();
+        const file = new File([blob], "privofit-2fa.png", { type: "image/png" });
+        if (!navigator.canShare || !navigator.canShare({ files: [file] })) {
+          window.location.assign(btn.href);
+          return;
+        }
+        await navigator.share({ files: [file], title: "PRIVOFIT 2FA" });
+        btn.textContent = "QR je uložené";
+        window.setTimeout(() => {
+          btn.textContent = previous;
+        }, 1800);
+      } catch (error) {
+        if (error && error.name === "AbortError") return;
+        window.location.assign(btn.href);
+      }
+    });
+  });
+
   const doorNav = document.querySelector("[data-door-nav]");
   const setDoorNav = (open) => {
     if (!doorNav) return;

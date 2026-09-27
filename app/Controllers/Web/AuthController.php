@@ -92,8 +92,7 @@ final class AuthController extends Controller
             $this->flashError($e->getMessage());
             $this->redirect('/prihlaseni');
         }
-        $intended = Session::pull('intended', '/user');
-        $this->redirect(is_string($intended) ? $intended : '/user');
+        $this->redirectAfterLogin($user);
     }
 
     public function googleStart(Request $request): never
@@ -161,8 +160,7 @@ final class AuthController extends Controller
         if ($mobile) {
             $this->redirectMobileError('Přihlášení přes Google se nepovedlo. Zkus to znovu.');
         }
-        $intended = Session::pull('intended', '/user');
-        $this->redirect(is_string($intended) ? $intended : '/user');
+        $this->redirectAfterLogin($user);
     }
 
     private function redirectMobileError(string $message): never
@@ -216,6 +214,15 @@ final class AuthController extends Controller
         } catch (HttpException $e) {
             $this->flashError($e->getMessage());
             $this->redirect('/prihlaseni');
+        }
+        $this->redirectAfterLogin($user);
+    }
+
+    /** @param array<string, mixed> $user */
+    private function redirectAfterLogin(array $user): never
+    {
+        if (AuthService::mfaRequiredFor($user) && (int) ($user['mfa_enabled'] ?? 0) !== 1) {
+            $this->redirect('/user/zabezpeceni/mfa');
         }
         $intended = Session::pull('intended', '/user');
         $this->redirect(is_string($intended) ? $intended : '/user');

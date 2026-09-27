@@ -1,4 +1,4 @@
-const CACHE = 'privofit-static-v12';
+const CACHE = 'privofit-static-v13';
 const ASSETS = [
   './assets/user/style.css',
   './assets/js/app.js',

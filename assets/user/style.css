@@ -3658,7 +3658,7 @@ a.adash-note-link:hover .adash-note-go { color: var(--lime); }
 }
 .adash-chart-head {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px 20px;
   flex-wrap: wrap;
@@ -3690,11 +3690,8 @@ a.adash-note-link:hover .adash-note-go { color: var(--lime); }
   100% { text-shadow: 0 0 0 transparent; }
 }
 .adash-chart-head .muted { margin-top: 6px; }
-.adash-chart-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
+.adash-chart-head .chart-kind { margin-top: 2px; }
+.chart-toolbar:not(:has(.chart-split-legend:not([hidden]))) { display: none; }
 .adash-chart-stage {
   position: relative;
   height: 240px;
@@ -4400,8 +4397,8 @@ a.adash-note-link:hover .adash-note-go { color: var(--lime); }
   .adash-links { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
 }
 @media (max-width: 640px) {
-  .adash-chart-actions { width: 100%; }
-  .adash-chart-actions .btn { flex: 1; justify-content: center; }
+  .adash-chart-head .chart-kind { width: 100%; }
+  .adash-chart-head .chart-kind-btn { flex: 1; padding: 0 8px; }
   .adash-mini-kpis { grid-template-columns: 1fr; }
 }
 @container (max-width: 560px) {
@@ -5687,6 +5684,85 @@ body.user-app:has(.profile-save.is-on) .app-main { padding-bottom: 140px; }
 .mfa-secret code {
   font-size: 1.05rem;
   letter-spacing: 0.08em;
+}
+.mfa-phone {
+  margin: 4px 0 18px;
+  padding-top: 4px;
+}
+.mfa-phone-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.mfa-phone-actions .btn {
+  flex: 1 1 180px;
+}
+.mfa-phone-hint {
+  margin: 10px 0 0;
+  color: var(--secondary);
+  font-size: 13px;
+}
+.mfa-guide {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.mfa-guide li {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.18);
+}
+.mfa-guide strong {
+  display: block;
+  margin-bottom: 4px;
+}
+.mfa-guide span {
+  color: var(--secondary);
+  font-size: 14px;
+}
+.mfa-gate-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+.mfa-gate-logo {
+  width: 180px;
+  height: auto;
+}
+.mfa-gate-intro {
+  margin-bottom: 18px;
+}
+.mfa-gate-intro h1 {
+  margin: 0 0 8px;
+}
+body.mfa-gate .app-main {
+  width: min(1040px, calc(100% - 32px));
+  max-width: none;
+  margin: 0 auto;
+  min-height: 100dvh;
+  padding: max(24px, env(safe-area-inset-top)) 0 40px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+body.mfa-gate .menu-toggle,
+body.mfa-gate .side-menu,
+body.mfa-gate .side-backdrop {
+  display: none;
+}
+@media (min-width: 860px) {
+  .mfa-guide { grid-template-columns: repeat(3, 1fr); }
+  .mfa-setup.profile-grid {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+    align-items: start;
+  }
 }
 .recovery-grid {
   list-style: none;

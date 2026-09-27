@@ -261,6 +261,7 @@ final class ProfileController extends Controller
         $user = $this->requireUser();
         $auth = AuthService::make($this->app->db());
         $enabled = (int) $user['mfa_enabled'] === 1;
+        $mfaRequired = AuthService::mfaRequiredFor($user);
         $setup = $enabled ? null : $auth->beginTotpSetup($user);
         $errors = Session::pull('errors', []);
         $recoveryLeft = $enabled ? $auth->remainingRecoveryCodes((int) $user['id']) : 0;
@@ -280,7 +281,8 @@ final class ProfileController extends Controller
         $this->view('user/mfa', [
             'title' => 'Dvoufaktorové ověření',
             'enabled' => $enabled,
-            'mfaRequired' => AuthService::mfaRequiredFor($user),
+            'mfaRequired' => $mfaRequired,
+            'mfaLock' => $mfaRequired && !$enabled,
             'recoveryLeft' => $recoveryLeft,
             'setup' => $setup,
             'errors' => $errors,
@@ -320,15 +322,29 @@ final class ProfileController extends Controller
 
     public function recoveryCodes(): never
     {
-        $this->requireUser();
+        $user = $this->requireUser();
         $codes = Session::pull('recovery_codes', []);
+        $codes = is_array($codes) ? $codes : [];
+        $mfaLock = $codes !== [] && AuthService::mfaRequiredFor($user);
+        $continue = '/user';
+        if ($mfaLock) {
+            $continue = is_admin_user($user) ? '/user/sprava' : '/user';
+            $intended = Session::pull('intended', '');
+            if (is_string($intended) && str_starts_with($intended, '/') && !str_starts_with($intended, '//')
+                && !str_starts_with($intended, '/user/zabezpeceni/mfa')
+                && !in_array($intended, ['/prihlaseni', '/odhlaseni', '/odhlaseno'], true)) {
+                $continue = $intended;
+            }
+        }
         $this->view('user/mfa-codes', [
             'title' => 'Záložní kódy',
-            'codes' => is_array($codes) ? $codes : [],
+            'codes' => $codes,
+            'mfaLock' => $mfaLock,
+            'continueTo' => $continue,
         ]);
     }
 
-    public function mfaQr(): never
+    public function mfaQr(Request $request): never
     {
         $user = $this->requireUser();
         if ((int) $user['mfa_enabled'] === 1) {
@@ -338,6 +354,9 @@ final class ProfileController extends Controller
             $uri = Session::get('mfa_setup_otpauth');
             if (!is_string($uri) || !str_starts_with($uri, 'otpauth://')) {
                 $uri = AuthService::make($this->app->db())->totpProvisioningUri($user);
+            }
+            if ((string) $request->query('stahnout', '') !== '') {
+                Response::download('privofit-2fa.png', QrSvg::png($uri), 'image/png');
             }
             Response::send(QrSvg::render($uri), 'image/svg+xml; charset=UTF-8');
         } catch (\Throwable $e) {

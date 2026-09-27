@@ -44,6 +44,42 @@ final class QrSvg
         return 'data:image/svg+xml;base64,' . base64_encode(self::inline($payload));
     }
 
+    public static function png(string $payload, int $scale = 12): string
+    {
+        if (!function_exists('imagecreatetruecolor')) {
+            throw new \RuntimeException('PNG QR není k dispozici.');
+        }
+        $matrix = (new self())->matrix($payload);
+        $size = count($matrix);
+        $px = $size * $scale;
+        $img = imagecreatetruecolor($px, $px);
+        if ($img === false) {
+            throw new \RuntimeException('PNG QR se nepodařilo vytvořit.');
+        }
+        $white = imagecolorallocate($img, 255, 255, 255);
+        $black = imagecolorallocate($img, 0, 0, 0);
+        imagefill($img, 0, 0, $white === false ? 0 : $white);
+        $ink = $black === false ? 0 : $black;
+        for ($y = 0; $y < $size; $y++) {
+            for ($x = 0; $x < $size; $x++) {
+                if ($matrix[$y][$x]) {
+                    imagefilledrectangle(
+                        $img,
+                        $x * $scale,
+                        $y * $scale,
+                        ($x + 1) * $scale - 1,
+                        ($y + 1) * $scale - 1,
+                        $ink
+                    );
+                }
+            }
+        }
+        ob_start();
+        imagepng($img);
+        imagedestroy($img);
+        return (string) ob_get_clean();
+    }
+
     /** @return list<list<bool>> */
     private function matrix(string $data): array
     {

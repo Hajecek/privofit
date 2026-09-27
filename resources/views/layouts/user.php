@@ -14,7 +14,9 @@ if (!function_exists('user_active')) {
 }
 $homeHref = $adminUi ? url('/user/sprava') : url('/user');
 $homeLabel = $adminUi ? 'PRIVOFIT – správa' : 'PRIVOFIT – přehled';
+$mfaLock = !empty($mfaLock);
 ?>
+<?php if (!$mfaLock): ?>
 <button class="menu-toggle" type="button" aria-label="Otevřít menu" aria-expanded="false" aria-controls="side-menu">☰</button>
 <div class="side-backdrop"></div>
 <aside class="side-menu" id="side-menu">
@@ -114,10 +116,11 @@ $homeLabel = $adminUi ? 'PRIVOFIT – správa' : 'PRIVOFIT – přehled';
     </nav>
     <?php require dirname(__DIR__) . '/partials/side-profile.php'; ?>
 </aside>
+<?php endif; ?>
 <div class="app-main" id="main">
     <?php require dirname(__DIR__) . '/partials/app-notices.php'; ?>
     <?= $content ?? '' ?>
 </div>
 <?php
 $inner = ob_get_clean();
-echo \App\Core\View::renderPartial('layouts/base', array_merge(get_defined_vars(), ['content' => $inner, 'bodyClass' => 'user-app']));
+echo \App\Core\View::renderPartial('layouts/base', array_merge(get_defined_vars(), ['content' => $inner, 'bodyClass' => 'user-app' . ($mfaLock ? ' mfa-gate' : '')]));

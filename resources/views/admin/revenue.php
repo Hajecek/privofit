@@ -133,10 +133,11 @@ $tabs = [
             <p
                 class="muted"
                 data-chart-hint
-                data-hint-line="Najetí ukáže součet · klik otevře den"
+                data-hint-curve="Hladká křivka · klik otevře den"
                 data-hint-area="Plochy podle tarifu · klik otevře den"
                 data-hint-bar="Sloupce podle tarifu · klik otevře den"
-            >Najetí ukáže součet · klik otevře den</p>
+                data-hint-ring="Podíl tarifů"
+            >Hladká křivka · klik otevře den</p>
         </div>
         <div class="rev-chart-donut">
             <canvas data-rev-donut width="88" height="88" aria-hidden="true"></canvas>
@@ -166,9 +167,10 @@ $tabs = [
         <?php endforeach; ?>
     </ul>
         <div class="chart-kind" role="tablist" aria-label="Typ grafu">
-            <button type="button" class="chart-kind-btn is-on" role="tab" data-chart-kind="line" aria-selected="true">Čára</button>
+            <button type="button" class="chart-kind-btn is-on" role="tab" data-chart-kind="curve" aria-selected="true">Křivka</button>
             <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="area" aria-selected="false">Plocha</button>
             <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="bar" aria-selected="false">Sloupce</button>
+            <button type="button" class="chart-kind-btn" role="tab" data-chart-kind="ring" aria-selected="false">Kruh</button>
         </div>
     </div>
     <div class="adash-chart-stage">
