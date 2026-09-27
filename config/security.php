@@ -32,7 +32,7 @@ return [
         'X-Content-Type-Options' => 'nosniff',
         'X-Frame-Options' => 'DENY',
         'Referrer-Policy' => 'strict-origin-when-cross-origin',
-        'Permissions-Policy' => 'camera=(), microphone=(), geolocation=(), payment=()',
+        'Permissions-Policy' => 'camera=(), microphone=(), geolocation=(), payment=(self "https://js.stripe.com" "https://hooks.stripe.com" "https://pay.google.com")',
     ],
     'hibp_enabled' => (bool) env_value('HIBP_ENABLED', true),
     'mfa_required_roles' => ['admin'],

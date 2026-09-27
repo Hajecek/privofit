@@ -15,6 +15,7 @@
 !/storage/backups/.gitkeep
 /storage/wallet/
 /storage/apple/
+/storage/firebase/
 /storage/app/installed.lock
 /uploads/avatars/*
 !/uploads/avatars/.gitkeep

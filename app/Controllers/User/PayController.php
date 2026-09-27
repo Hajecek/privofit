@@ -56,6 +56,9 @@ final class PayController extends Controller
         $publicId = trim((string) $request->query('platba', ''));
         $back = $publicId !== '' ? '/user/platba/' . rawurlencode($publicId) : '/user';
         if ((string) $request->query('redirect_status', '') === 'failed') {
+            if ($publicId !== '') {
+                CheckoutService::make($this->app->db())->noteMembershipDeclined($publicId, $user);
+            }
             $this->flashError('Platba se nedokončila. Můžeš to zkusit znovu.');
             $this->redirect($back);
         }

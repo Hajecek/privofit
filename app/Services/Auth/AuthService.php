@@ -7,12 +7,15 @@ namespace App\Services\Auth;
 use App\Core\Crypto;
 use App\Core\Database;
 use App\Core\HttpException;
+use App\Core\Logger;
 use App\Core\RateLimiter;
 use App\Core\Request;
 use App\Core\Session;
 use App\Core\Validator;
 use App\Services\AuditService;
 use App\Services\AvatarService;
+use App\Services\Cron\CronText;
+use App\Services\Cron\NotificationDispatcher;
 use App\Services\MailService;
 use App\Services\PasswordBreachService;
 use App\Services\PhoneService;
@@ -142,6 +145,7 @@ final class AuthService
             'subject' => 'Vítejte v PRIVOFIT',
             'first_name' => $user['first_name'],
         ], $userId);
+        $this->notifyAdminsRegistered($user);
 
         return $user;
     }
@@ -266,7 +270,41 @@ final class AuthService
             ], $userId);
         } catch (\Throwable) {
         }
+        $this->notifyAdminsRegistered($user);
         return $user;
+    }
+
+    /** @param array<string, mixed> $user */
+    private function notifyAdminsRegistered(array $user): void
+    {
+        $id = (int) ($user['id'] ?? 0);
+        if ($id < 1) {
+            return;
+        }
+        $publicId = trim((string) ($user['public_id'] ?? ''));
+        $path = $publicId !== ''
+            ? '/user/sprava/zakaznici/' . rawurlencode($publicId)
+            : '/user/sprava/zakaznici';
+        try {
+            NotificationDispatcher::make($this->db)->notifyNow(
+                'admin:user.registered:' . $id,
+                'admin',
+                'user.registered',
+                null,
+                [
+                    'template' => 'admin-registration',
+                    'push_type' => 'admin.sync',
+                    'subject' => '✨ Nový účet',
+                    'body' => CronText::person($user),
+                    'action_url' => CronText::link($path),
+                ]
+            );
+        } catch (\Throwable $e) {
+            Logger::error('Zpráva administrátorům o registraci se neodeslala', [
+                'user' => $id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /** @param array{given_name:string,family_name:string,name:string} $profile

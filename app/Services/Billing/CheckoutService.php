@@ -8,6 +8,8 @@ use App\Core\Application;
 use App\Core\Database;
 use App\Core\HttpException;
 use App\Services\Auth\AuthService;
+use App\Services\Cron\CronText;
+use App\Services\Cron\NotificationDispatcher;
 use App\Services\MembershipService;
 use App\Services\ReservationService;
 use App\Support\Clock;
@@ -80,6 +82,10 @@ final class CheckoutService
             $this->completeFromIntent($object);
             return;
         }
+        if ($type === 'payment_intent.payment_failed') {
+            $this->noteMembershipFromIntent($object, 'declined');
+            return;
+        }
         if ($type === 'checkout.session.completed' || $type === 'checkout.session.async_payment_succeeded') {
             if (($object['payment_status'] ?? '') === 'paid' || ($object['status'] ?? '') === 'complete') {
                 $this->completeFromSession($object, (string) ($object['payment_intent'] ?? $sessionId));
@@ -93,6 +99,13 @@ final class CheckoutService
                 if ($reservation) {
                     $this->reservations->failPending($reservation);
                 }
+            }
+            if ($payment && !empty($payment['membership_id'])) {
+                $kind = $type === 'checkout.session.async_payment_failed' ? 'declined' : 'cancelled';
+                if ($kind === 'cancelled') {
+                    $this->cancelMembershipPayment($payment);
+                }
+                (new MembershipAdminNotice($this->db))->send((int) $payment['id'], $kind);
             }
         }
     }
@@ -113,8 +126,18 @@ final class CheckoutService
             }
         }
         if (!empty($payment['membership_id'])) {
-            (new MembershipService($this->db))->cancelPending((int) $payment['membership_id'], (int) $user['id']);
+            $this->cancelMembershipPayment($payment);
+            (new MembershipAdminNotice($this->db))->send((int) $payment['id'], 'cancelled');
         }
+    }
+
+    public function noteMembershipDeclined(string $paymentPublicId, array $user): void
+    {
+        $payment = $this->payments->findByPublicId(trim($paymentPublicId));
+        if (!$payment || (int) ($payment['user_id'] ?? 0) !== (int) $user['id'] || empty($payment['membership_id'])) {
+            return;
+        }
+        (new MembershipAdminNotice($this->db))->send((int) $payment['id'], 'declined');
     }
 
     /** @param array<string, mixed> $session */
@@ -205,22 +228,29 @@ final class CheckoutService
                 $gateway->cancelPaymentIntent($existingId);
             }
         }
-        $intent = $gateway->chargePaymentMethod(
-            $confirmationTokenId,
-            $priced['chargeMinor'],
-            'czk',
-            (string) $payment['public_id'] . ':' . $confirmationTokenId . ':' . $priced['chargeMinor'],
-            $summary['description'],
-            $returnUrl,
-            [
-                'payment' => (string) $payment['public_id'],
-                'user' => (string) ($user['public_id'] ?? $user['id']),
-                'net' => $priced['net'],
-                'fee' => $priced['fee'],
-                'card_country' => $inspected['country'],
-            ],
-            trim((string) ($user['email'] ?? '')),
-        );
+        try {
+            $intent = $gateway->chargePaymentMethod(
+                $confirmationTokenId,
+                $priced['chargeMinor'],
+                'czk',
+                (string) $payment['public_id'] . ':' . $confirmationTokenId . ':' . $priced['chargeMinor'],
+                $summary['description'],
+                $returnUrl,
+                [
+                    'payment' => (string) $payment['public_id'],
+                    'user' => (string) ($user['public_id'] ?? $user['id']),
+                    'net' => $priced['net'],
+                    'fee' => $priced['fee'],
+                    'card_country' => $inspected['country'],
+                ],
+                trim((string) ($user['email'] ?? '')),
+            );
+        } catch (HttpException $e) {
+            if ($e->status === 402 && !empty($payment['membership_id'])) {
+                (new MembershipAdminNotice($this->db))->send((int) $payment['id'], 'declined');
+            }
+            throw $e;
+        }
         if ($intent['id'] !== '') {
             $this->payments->attachProviderReference((int) $payment['id'], $intent['id']);
         }
@@ -271,6 +301,32 @@ final class CheckoutService
         $this->finish($payment, $intentId);
     }
 
+    /** @param array<string, mixed> $intent */
+    private function noteMembershipFromIntent(array $intent, string $kind): void
+    {
+        $intentId = (string) ($intent['id'] ?? '');
+        $publicId = (string) (($intent['metadata']['payment'] ?? null) ?: '');
+        $payment = $publicId !== '' ? $this->payments->findByPublicId($publicId) : null;
+        if (!$payment && $intentId !== '') {
+            $payment = $this->payments->findByProviderReference($intentId);
+        }
+        if (!$payment || empty($payment['membership_id'])) {
+            return;
+        }
+        (new MembershipAdminNotice($this->db))->send((int) $payment['id'], $kind);
+    }
+
+    /** @param array<string, mixed> $payment */
+    private function cancelMembershipPayment(array $payment): void
+    {
+        $userId = (int) ($payment['user_id'] ?? 0);
+        $membershipId = (int) ($payment['membership_id'] ?? 0);
+        if ($userId < 1 || $membershipId < 1 || (string) ($payment['status'] ?? '') === 'paid') {
+            return;
+        }
+        (new MembershipService($this->db))->cancelPending($membershipId, $userId);
+    }
+
     /** @param array<string, mixed> $payment @return array<string, mixed> */
     private function finish(array $payment, string $reference): array
     {
@@ -282,6 +338,7 @@ final class CheckoutService
         $this->payments->captureStripeFacts((int) $payment['id'], $reference);
         if (!empty($payment['membership_id'])) {
             (new MembershipService($this->db))->activatePurchase((int) $payment['membership_id']);
+            (new MembershipAdminNotice($this->db))->send((int) $payment['id'], 'paid');
         }
         $reservation = $payment['reservation_id'] ? $this->reservations->findById((int) $payment['reservation_id']) : null;
         if (!$reservation) {
@@ -289,7 +346,48 @@ final class CheckoutService
         }
         $user = AuthService::make($this->db)->findById((int) $reservation['user_id']);
         $this->reservations->confirmPending($reservation, $user ?: []);
+        $this->notifyReservationPaid($payment, $reservation, $user ?: []);
         return $this->payments->findByPublicId((string) $payment['public_id']) ?? $payment;
+    }
+
+    /**
+     * @param array<string, mixed> $payment
+     * @param array<string, mixed> $reservation
+     * @param array<string, mixed> $user
+     */
+    private function notifyReservationPaid(array $payment, array $reservation, array $user): void
+    {
+        $person = CronText::person($user);
+        $when = '';
+        try {
+            $when = Clock::format((string) $reservation['starts_at'], 'j. n. Y H:i');
+        } catch (\Throwable) {
+            $when = '';
+        }
+        $charged = (float) ($payment['charged_amount'] ?? 0);
+        $amount = $charged > 0 ? $charged : (float) ($payment['amount'] ?? 0);
+        $money = number_format($amount, 2, ',', ' ') . ' Kč';
+        $parts = array_values(array_filter([$person, $when, $money], static fn (string $part): bool => $part !== ''));
+        try {
+            NotificationDispatcher::make($this->db)->notifyNow(
+                'admin:reservation.paid:' . (int) $payment['id'],
+                'admin',
+                'reservation.paid',
+                null,
+                [
+                    'template' => 'admin-reservation',
+                    'push_type' => 'admin.sync',
+                    'subject' => '🗓️ Rezervace zaplacena',
+                    'body' => implode(' · ', $parts),
+                    'action_url' => CronText::link('/user/sprava/rezervace'),
+                ]
+            );
+        } catch (\Throwable $e) {
+            \App\Core\Logger::error('Zpráva administrátorům o rezervaci se neodeslala', [
+                'payment' => $payment['id'] ?? null,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /** @param array<string, mixed> $payment @return array<string, mixed> */

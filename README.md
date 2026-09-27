@@ -64,7 +64,7 @@ Dokumentace, ze které integrace vychází: Nuki Web API v1.5.3, `https://api.nu
 
 ## Cron a e-maily
 
-`bin/cron.php` expiruje nezaplacené rezervace, členství, odesílá frontu e-mailů a maže staré rate-limit / access logy.
+`bin/cron.php` se spouští každých 5 minut. Zámek v databázi zabrání souběhu. Úlohy po jedné expirují nezaplacené rezervace a členství, připomínají termíny a končící členství, hlásí neúspěšné platby a nové zprávy z webu, a teprve potom odešlou frontu. Zákaznické připomínky ctí nastavení oznámení. Provozní zprávy jdou jen aktivním administrátorům. Staré logy, audit, cron události a odeslané notifikace se mažou podle retence.
 
 V `.env` nechte `MAIL_MAILER=log` do doby, než bude SMTP. E-maily se zapisují do `storage/logs/mail-*.log`.
 

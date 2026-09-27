@@ -646,7 +646,8 @@ final class ReservationService
         );
     }
 
-    public function expireHolds(): int
+    /** @return list<int> Identifikátory rezervací, kterým právě vypršela nezaplacená blokace. */
+    public function expireHolds(): array
     {
         $minutes = $this->settings->int('reservation.hold_minutes', 40);
         $limit = Clock::nowUtc()->modify('-' . $minutes . ' minutes')->format('Y-m-d H:i:s');
@@ -654,9 +655,12 @@ final class ReservationService
             "SELECT id FROM reservations WHERE status = 'pending_payment' AND created_at < :limit",
             ['limit' => $limit]
         );
+        $ids = [];
         foreach ($rows as $row) {
-            $this->db->update('reservations', ['status' => 'expired'], 'id = :id', ['id' => (int) $row['id']]);
-            $this->releaseOccupancy((int) $row['id']);
+            $id = (int) $row['id'];
+            $this->db->update('reservations', ['status' => 'expired'], 'id = :id', ['id' => $id]);
+            $this->releaseOccupancy($id);
+            $ids[] = $id;
         }
         $this->db->query(
             "UPDATE reservations SET status = 'completed'
@@ -664,11 +668,10 @@ final class ReservationService
                AND DATE_ADD(ends_at, INTERVAL COALESCE(buffer_minutes, 0) MINUTE) < :now",
             ['now' => Clock::utc()]
         );
-        $count = count($rows);
-        if ($count > 0) {
+        if ($ids !== []) {
             $this->touchLive();
         }
-        return $count;
+        return $ids;
     }
 
     public function room(?int $roomId = null): array

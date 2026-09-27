@@ -10,6 +10,10 @@ use App\Support\Clock;
 
 final class AppPushService
 {
+    private static ?string $accessToken = null;
+
+    private static int $accessTokenExp = 0;
+
     public function __construct(private readonly Database $db)
     {
     }
@@ -102,12 +106,27 @@ final class AppPushService
 
     private function sendFcm(int $userId, string $title, string $body, string $type): void
     {
-        $key = trim((string) env_value('FCM_SERVER_KEY', ''));
-        if ($key === '') {
+        if ((string) env_value('APP_ENV', 'local') === 'testing') {
             return;
         }
-        foreach ($this->tokensFor($userId) as $token) {
-            $this->postFcm($key, $token, $title, $body, $type);
+        $tokens = $this->tokensFor($userId);
+        if ($tokens === []) {
+            return;
+        }
+        $account = $this->firebaseAccount();
+        if ($account === null) {
+            Logger::error('Push se neodeslal, chybí Firebase účet služby', [
+                'user' => $userId,
+                'tokens' => count($tokens),
+            ]);
+            return;
+        }
+        $accessToken = $this->accessToken($account);
+        if ($accessToken === null) {
+            return;
+        }
+        foreach ($tokens as $token) {
+            $this->postFcm($account, $accessToken, $token, null, $title, $body, $type);
         }
     }
 
@@ -117,84 +136,295 @@ final class AppPushService
         $tokens = [];
         try {
             $rows = $this->db->fetchAll(
-                "SELECT token FROM fcm_tokens WHERE user_id = :uid AND is_active = 1 AND token <> ''",
+                "SELECT token FROM fcm_tokens
+                 WHERE user_id = :uid AND is_active = 1 AND invalidated_at IS NULL AND token LIKE '%:%'",
                 ['uid' => $userId]
             );
             foreach ($rows as $row) {
-                $token = (string) ($row['token'] ?? '');
-                if (strlen($token) >= 32) {
+                $token = trim((string) ($row['token'] ?? ''));
+                if (str_contains($token, ':')) {
                     $tokens[$token] = $token;
                 }
             }
         } catch (\Throwable) {
             $tokens = [];
         }
-        if ($tokens !== []) {
-            return array_values($tokens);
-        }
-        $devices = $this->db->fetchAll(
-            "SELECT push_token FROM api_devices WHERE user_id = :uid AND push_token IS NOT NULL AND push_token != ''",
-            ['uid' => $userId]
-        );
-        foreach ($devices as $device) {
-            $token = (string) ($device['push_token'] ?? '');
-            if (strlen($token) >= 32) {
-                $tokens[$token] = $token;
-            }
-        }
         return array_values($tokens);
     }
 
     private function sendFcmTopic(string $topic, string $type, string $revision): void
     {
-        $key = trim((string) env_value('FCM_SERVER_KEY', ''));
-        if ($key === '') {
+        if ((string) env_value('APP_ENV', 'local') === 'testing') {
             return;
         }
-        $this->postFcm($key, '/topics/' . $topic, '', '', $type, $revision, true);
+        $account = $this->firebaseAccount();
+        if ($account === null) {
+            return;
+        }
+        $accessToken = $this->accessToken($account);
+        if ($accessToken === null) {
+            return;
+        }
+        $this->postFcm($account, $accessToken, null, $topic, '', '', $type, $revision, true);
     }
 
-    private function postFcm(string $key, string $token, string $title, string $body, string $type, string $revision = '', bool $silent = false): void
+    /** @return array{project_id:string,client_email:string,private_key:string}|null */
+    private function firebaseAccount(): ?array
     {
-        $ch = curl_init('https://fcm.googleapis.com/fcm/send');
-        if ($ch === false) {
+        $path = trim((string) env_value('FIREBASE_CREDENTIALS', 'storage/firebase/privofit-firebase-adminsdk.json'));
+        if ($path === '') {
+            return null;
+        }
+        if ($path[0] !== '/') {
+            $path = dirname(__DIR__, 2) . '/' . ltrim($path, '/');
+        }
+        if (!is_readable($path)) {
+            return null;
+        }
+        try {
+            $data = json_decode((string) file_get_contents($path), true, 8, JSON_THROW_ON_ERROR);
+        } catch (\Throwable) {
+            return null;
+        }
+        if (!is_array($data)) {
+            return null;
+        }
+        foreach (['project_id', 'client_email', 'private_key'] as $key) {
+            if (!is_string($data[$key] ?? null) || $data[$key] === '') {
+                return null;
+            }
+        }
+        return [
+            'project_id' => $data['project_id'],
+            'client_email' => $data['client_email'],
+            'private_key' => $data['private_key'],
+        ];
+    }
+
+    /** @param array{project_id:string,client_email:string,private_key:string} $account */
+    private function accessToken(array $account, bool $force = false): ?string
+    {
+        if (!$force && self::$accessToken !== null && self::$accessTokenExp > time() + 60) {
+            return self::$accessToken;
+        }
+        $cache = $this->accessTokenCachePath();
+        if (!$force && is_readable($cache)) {
+            $stored = json_decode((string) file_get_contents($cache), true);
+            if (is_array($stored) && is_string($stored['token'] ?? null) && (int) ($stored['exp'] ?? 0) > time() + 60) {
+                self::$accessToken = $stored['token'];
+                self::$accessTokenExp = (int) $stored['exp'];
+                return self::$accessToken;
+            }
+        }
+        $now = time();
+        $unsigned = $this->b64url((string) json_encode(['alg' => 'RS256', 'typ' => 'JWT']))
+            . '.'
+            . $this->b64url((string) json_encode([
+                'iss' => $account['client_email'],
+                'scope' => 'https://www.googleapis.com/auth/firebase.messaging',
+                'aud' => 'https://oauth2.googleapis.com/token',
+                'iat' => $now,
+                'exp' => $now + 3600,
+            ]));
+        $key = openssl_pkey_get_private($account['private_key']);
+        if ($key === false) {
+            Logger::error('Firebase klíč nejde načíst');
+            return null;
+        }
+        $signature = '';
+        if (!openssl_sign($unsigned, $signature, $key, OPENSSL_ALGO_SHA256)) {
+            Logger::error('Firebase klíč nejde podepsat');
+            return null;
+        }
+        $jwt = $unsigned . '.' . $this->b64url($signature);
+        $raw = $this->http('https://oauth2.googleapis.com/token', [
+            'Content-Type: application/x-www-form-urlencoded',
+        ], http_build_query([
+            'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+            'assertion' => $jwt,
+        ]), $status);
+        $decoded = json_decode($raw, true);
+        $token = is_array($decoded) ? (string) ($decoded['access_token'] ?? '') : '';
+        if ($status >= 400 || $token === '') {
+            Logger::error('Firebase přístupový token se nepodařilo získat', ['status' => $status]);
+            return null;
+        }
+        $exp = $now + max(120, (int) ($decoded['expires_in'] ?? 3600));
+        self::$accessToken = $token;
+        self::$accessTokenExp = $exp;
+        $dir = dirname($cache);
+        if (!is_dir($dir)) {
+            mkdir($dir, 0700, true);
+        }
+        file_put_contents($cache, json_encode(['token' => $token, 'exp' => $exp]));
+        @chmod($cache, 0600);
+        return $token;
+    }
+
+    private function forgetAccessToken(): void
+    {
+        self::$accessToken = null;
+        self::$accessTokenExp = 0;
+        $cache = $this->accessTokenCachePath();
+        if (is_file($cache)) {
+            unlink($cache);
+        }
+    }
+
+    private function accessTokenCachePath(): string
+    {
+        return dirname(__DIR__, 2) . '/storage/cache/fcm-oauth.json';
+    }
+
+    /**
+     * @param array{project_id:string,client_email:string,private_key:string} $account
+     */
+    private function postFcm(
+        array $account,
+        string $accessToken,
+        ?string $deviceToken,
+        ?string $topic,
+        string $title,
+        string $body,
+        string $type,
+        string $revision = '',
+        bool $silent = false,
+    ): void {
+        $status = $this->deliverFcm($account, $accessToken, $deviceToken, $topic, $title, $body, $type, $revision, $silent);
+        if ($status !== 401) {
             return;
         }
+        $this->forgetAccessToken();
+        $fresh = $this->accessToken($account, true);
+        if ($fresh === null) {
+            return;
+        }
+        $this->deliverFcm($account, $fresh, $deviceToken, $topic, $title, $body, $type, $revision, $silent);
+    }
+
+    /**
+     * @param array{project_id:string,client_email:string,private_key:string} $account
+     */
+    private function deliverFcm(
+        array $account,
+        string $accessToken,
+        ?string $deviceToken,
+        ?string $topic,
+        string $title,
+        string $body,
+        string $type,
+        string $revision,
+        bool $silent,
+    ): int {
         $message = [
-            'to' => $token,
-            'priority' => 'high',
-            'content_available' => true,
             'data' => [
                 'type' => $type,
                 'revision' => $revision,
             ],
         ];
+        if ($deviceToken !== null && $deviceToken !== '') {
+            $message['token'] = $deviceToken;
+        } elseif ($topic !== null && $topic !== '') {
+            $message['topic'] = $topic;
+        } else {
+            return 0;
+        }
         if (!$silent && $title !== '') {
             $message['notification'] = [
                 'title' => $title,
                 'body' => $body,
-                'sound' => 'default',
+            ];
+            $message['android'] = [
+                'priority' => 'HIGH',
+                'notification' => ['sound' => 'default'],
+            ];
+            $message['apns'] = [
+                'headers' => ['apns-priority' => '10'],
+                'payload' => ['aps' => ['sound' => 'default']],
+            ];
+        } else {
+            $message['android'] = ['priority' => 'HIGH'];
+            $message['apns'] = [
+                'headers' => [
+                    'apns-priority' => '5',
+                    'apns-push-type' => 'background',
+                ],
+                'payload' => ['aps' => ['content-available' => 1]],
             ];
         }
-        $payload = json_encode($message, JSON_UNESCAPED_UNICODE);
+        $url = 'https://fcm.googleapis.com/v1/projects/' . rawurlencode($account['project_id']) . '/messages:send';
+        $raw = $this->http($url, [
+            'Authorization: Bearer ' . $accessToken,
+            'Content-Type: application/json',
+        ], (string) json_encode(['message' => $message], JSON_UNESCAPED_UNICODE), $status);
+        if ($status >= 400) {
+            $errorCode = $this->fcmErrorCode($raw);
+            Logger::error('FCM se nepodařilo odeslat', [
+                'status' => $status,
+                'error' => $errorCode,
+            ]);
+            if ($deviceToken !== null && in_array($errorCode, ['UNREGISTERED', 'NOT_FOUND'], true)) {
+                $this->invalidateToken($deviceToken, $errorCode);
+            }
+        }
+        return $status;
+    }
+
+    private function fcmErrorCode(string $raw): string
+    {
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return '';
+        }
+        $code = (string) ($decoded['error']['status'] ?? '');
+        foreach ($decoded['error']['details'] ?? [] as $detail) {
+            if (is_array($detail) && is_string($detail['errorCode'] ?? null) && $detail['errorCode'] !== '') {
+                return $detail['errorCode'];
+            }
+        }
+        return $code;
+    }
+
+    private function invalidateToken(string $token, string $reason): void
+    {
+        try {
+            $this->db->query(
+                'UPDATE fcm_tokens
+                 SET is_active = 0, invalidated_at = :now, invalid_reason = :reason
+                 WHERE token_hash = :hash AND is_active = 1',
+                [
+                    'now' => Clock::utc(),
+                    'reason' => substr($reason, 0, 255),
+                    'hash' => hash('sha256', $token),
+                ]
+            );
+        } catch (\Throwable) {
+        }
+    }
+
+    /** @param list<string> $headers */
+    private function http(string $url, array $headers, string $body, ?int &$status): string
+    {
+        $status = 0;
+        $ch = curl_init($url);
+        if ($ch === false) {
+            return '';
+        }
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => [
-                'Authorization: key=' . $key,
-                'Content-Type: application/json',
-            ],
-            CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_POSTFIELDS => $body,
             CURLOPT_TIMEOUT => 8,
         ]);
         $raw = curl_exec($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
-        if ($status >= 400) {
-            Logger::error('FCM se nepodařilo odeslat', [
-                'status' => $status,
-                'body' => is_string($raw) ? substr($raw, 0, 300) : '',
-            ]);
-        }
+        return is_string($raw) ? $raw : '';
+    }
+
+    private function b64url(string $value): string
+    {
+        return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
     }
 }
