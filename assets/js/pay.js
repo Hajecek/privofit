@@ -185,10 +185,8 @@
       return false;
     }
     if (!data.ready) {
-      const name = String(data.label || "karta");
-      showStatus(name + " · účtuji " + crowns(data.charge) + ".");
+      showStatus("Probíhá platba. Na nic už neklikej.");
       await useQuote(data);
-      if (button) button.textContent = "Účtuji…";
       data = await authorize();
       if (!data) return false;
     }
@@ -240,23 +238,29 @@
     }
   });
 
+  const setPaying = (on) => {
+    root.classList.toggle("is-paying", on);
+    if (!button) return;
+    button.disabled = on;
+    button.classList.toggle("is-loading", on);
+    button.textContent = on ? "Probíhá platba…" : "Zaplatit kartou";
+  };
+
   button?.addEventListener("click", async () => {
     if (busy) return;
     busy = true;
-    button.disabled = true;
+    setPaying(true);
     showError("");
-    showStatus("");
+    showStatus("Probíhá platba. Na nic už neklikej.");
     try {
-      await completePayment();
+      const paid = await completePayment();
+      if (!paid && !leaving) showStatus("");
     } catch (error) {
       showStatus("");
       showError(error instanceof Error ? error.message : "Platbu se nepodařilo dokončit.");
     } finally {
       busy = false;
-      if (!leaving && button) {
-        button.disabled = false;
-        button.textContent = "Zaplatit kartou";
-      }
+      if (!leaving) setPaying(false);
     }
   });
 })();

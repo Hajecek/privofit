@@ -5593,6 +5593,29 @@ body.user-app:has(.profile-save.is-on) .app-main { padding-bottom: 140px; }
   color: var(--lime);
   font-weight: 700;
 }
+.pay-checkout.is-paying .pay-choices,
+.pay-checkout.is-paying .pay-info,
+.pay-checkout.is-paying .pay-wallets,
+.pay-checkout.is-paying .pay-actions a {
+  pointer-events: none;
+  opacity: .45;
+}
+.button.is-loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.button.is-loading::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: pay-spin .7s linear infinite;
+}
+@keyframes pay-spin { to { transform: rotate(360deg); } }
 .pay-wallets.is-ready {
   margin-bottom: 4px;
 }
