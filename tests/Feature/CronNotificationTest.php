@@ -126,6 +126,89 @@ final class CronNotificationTest extends TestCase
         unset($customer, $admin);
     }
 
+    public function testUserHearsWhenReservationIsAboutToEnd(): void
+    {
+        $room = $this->db->fetch('SELECT id, name FROM rooms WHERE is_active = 1 ORDER BY id ASC LIMIT 1');
+        if (!$room) {
+            $this->markTestSkipped('V databázi není aktivní studio.');
+        }
+        try {
+            $this->db->fetch('SELECT id FROM cron_events LIMIT 1');
+        } catch (\Throwable) {
+            $this->markTestSkipped('Chybí tabulka cron_events. Spusťte migrace.');
+        }
+
+        $customer = $this->createVerifiedUser('konec');
+        $customerId = (int) $customer['id'];
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $reservationId = (int) $this->db->insert('reservations', [
+                'public_id' => Crypto::uuid(),
+                'room_id' => (int) $room['id'],
+                'user_id' => $customerId,
+                'status' => 'confirmed',
+                'starts_at' => '2099-06-01 12:00:00',
+                'ends_at' => '2099-06-01 13:00:00',
+                'buffer_minutes' => 15,
+                'guest_count' => 1,
+                'price' => '0.00',
+                'currency' => 'CZK',
+                'created_at' => '2099-05-01 08:00:00',
+                'updated_at' => '2099-05-01 08:00:00',
+            ]);
+            $notify = NotificationDispatcher::make($this->db);
+            $early = new ReservationReminderJob(
+                $this->db,
+                $notify,
+                new \DateTimeImmutable('2099-06-01 12:40:00', new \DateTimeZone('UTC'))
+            );
+            $this->assertSame(0, $early->run()['users']);
+
+            $quarter = new ReservationReminderJob(
+                $this->db,
+                $notify,
+                new \DateTimeImmutable('2099-06-01 12:50:00', new \DateTimeZone('UTC'))
+            );
+            $this->assertSame(1, $quarter->run()['users']);
+            $this->assertSame(0, $quarter->run()['users']);
+
+            $firstKey = 'user:reservation.ending.15:' . $reservationId;
+            $this->assertSame('dispatched', $notify->dispatchKey($firstKey));
+            $this->assertSame(0, $this->countChannel($customerId, 'reservation-ending', 'email'));
+            $this->assertSame(1, $this->countChannel($customerId, 'reservation-ending', 'in_app'));
+            $payload = json_decode((string) $this->db->fetchColumn(
+                "SELECT payload_json FROM notifications WHERE user_id = :uid AND template = 'reservation-ending' AND channel = 'in_app'",
+                ['uid' => $customerId]
+            ), true);
+            $this->assertSame('💦 Poslední série', $payload['subject']);
+            $this->assertStringContainsString((string) $room['name'], (string) $payload['body']);
+            $this->assertStringContainsString('15:00', (string) $payload['body']);
+            $this->assertStringContainsString('Ještě jedna pěkná série', (string) $payload['body']);
+
+            $last = new ReservationReminderJob(
+                $this->db,
+                $notify,
+                new \DateTimeImmutable('2099-06-01 12:56:00', new \DateTimeZone('UTC'))
+            );
+            $this->assertSame(1, $last->run()['users']);
+            $this->assertSame(0, $last->run()['users']);
+            $this->assertSame('dispatched', $notify->dispatchKey('user:reservation.ending.5:' . $reservationId));
+            $this->assertSame(0, $this->countChannel($customerId, 'reservation-ending', 'email'));
+            $this->assertSame(2, $this->countChannel($customerId, 'reservation-ending', 'in_app'));
+            $fresh = json_decode((string) $this->db->fetchColumn(
+                "SELECT payload_json FROM notifications WHERE user_id = :uid AND template = 'reservation-ending' AND channel = 'in_app' ORDER BY id DESC LIMIT 1",
+                ['uid' => $customerId]
+            ), true);
+            $this->assertSame('⏱️ Už jen pět minut', $fresh['subject']);
+            $this->assertStringContainsString('Činky si odpočinou, ty taky', (string) $fresh['body']);
+        } finally {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+        }
+    }
+
     public function testAdminHearsAboutMembershipPaymentImmediately(): void
     {
         try {

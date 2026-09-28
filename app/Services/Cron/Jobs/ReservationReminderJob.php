@@ -13,6 +13,9 @@ use App\Support\Clock;
 
 final class ReservationReminderJob implements CronJob
 {
+    private const ENDING_FIRST_MINUTES = 15;
+    private const ENDING_LAST_MINUTES = 5;
+
     public function __construct(
         private readonly Database $db,
         private readonly NotificationDispatcher $notify,
@@ -109,7 +112,64 @@ final class ReservationReminderJob implements CronJob
                 }
             }
         }
+        $userCount += $this->remindEnding($now);
         return ['users' => $userCount, 'admins' => $adminCount];
+    }
+
+    private function remindEnding(\DateTimeImmutable $now): int
+    {
+        $rows = $this->db->fetchAll(
+            "SELECT r.id, r.user_id, r.ends_at, r.created_at, rm.name AS room_name
+             FROM reservations r
+             INNER JOIN rooms rm ON rm.id = r.room_id
+             WHERE r.status = 'confirmed'
+               AND r.user_id IS NOT NULL
+               AND r.ends_at > :now
+               AND r.ends_at <= :until",
+            [
+                'now' => $now->format('Y-m-d H:i:s'),
+                'until' => $now->modify('+' . self::ENDING_FIRST_MINUTES . ' minutes')->format('Y-m-d H:i:s'),
+            ]
+        );
+        $count = 0;
+        foreach ($rows as $row) {
+            $target = $this->at((string) $row['ends_at']);
+            $created = $this->at((string) $row['created_at']);
+            $when = Clock::format((string) $row['ends_at'], 'H:i');
+            $room = (string) $row['room_name'];
+            $id = (int) $row['id'];
+            $userId = (int) $row['user_id'];
+            if (DueWindow::open($now, $target, $created, self::ENDING_FIRST_MINUTES, self::ENDING_LAST_MINUTES)) {
+                if ($this->scheduleEnding($id, $userId, 15, '💦 Poslední série', 'Ve studiu ' . $room . ' máš ještě čtvrthodinku, konec je v ' . $when . '. Ještě jedna pěkná série a pak už jen v klidu dojet. ✨')) {
+                    $count++;
+                }
+            }
+            if (DueWindow::open($now, $target, $created, self::ENDING_LAST_MINUTES)) {
+                if ($this->scheduleEnding($id, $userId, 5, '⏱️ Už jen pět minut', 'Ve studiu ' . $room . ' zbývá pět minut. Činky si odpočinou, ty taky. Rádi tě tu uvidíme znovu. 💪')) {
+                    $count++;
+                }
+            }
+        }
+
+        return $count;
+    }
+
+    private function scheduleEnding(int $reservationId, int $userId, int $leadMinutes, string $subject, string $body): bool
+    {
+        return $this->notify->schedule(
+            'user:reservation.ending.' . $leadMinutes . ':' . $reservationId,
+            'user',
+            'reservation.ending',
+            $userId,
+            [
+                'template' => 'reservation-ending',
+                'skip_email' => true,
+                'push_type' => 'reservation.sync',
+                'subject' => $subject,
+                'body' => $body,
+                'action_url' => CronText::link('/user/moje-rezervace'),
+            ]
+        );
     }
 
     private function at(string $utc): \DateTimeImmutable
