@@ -1405,10 +1405,10 @@ body.side-collapsed .side-menu:focus-within {
 }
 .hour-meta { color: var(--secondary); font-size: .8rem; font-weight: 600; }
 .hour-row.is-selected {
-  border-color: var(--lime);
-  background: linear-gradient(90deg, #c6f21a24, #c6f21a0d);
+  border-color: #c6f21a99;
+  background: linear-gradient(90deg, #d7f06a22, #c6f21a0a);
   color: var(--fog);
-  box-shadow: inset 3px 0 0 var(--lime);
+  box-shadow: inset 4px 0 0 #d7f06a;
 }
 .hour-row.is-selected + .hour-row.is-selected {
   margin-top: -2px;

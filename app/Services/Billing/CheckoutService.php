@@ -43,6 +43,44 @@ final class CheckoutService
         return $app->absoluteUrl('/user/platba/' . rawurlencode((string) $payment['public_id']));
     }
 
+    /**
+     * Jedna platba za víc rezervací. Souvislá okénka už jsou sloučená,
+     * sem přijdou oddělené termíny.
+     *
+     * @param list<array<string, mixed>> $reservations
+     */
+    public function startBundle(array $user, array $reservations, Application $app): string
+    {
+        if (count($reservations) < 2) {
+            return $this->start($user, $reservations[0], $app);
+        }
+        $sum = 0.0;
+        foreach ($reservations as $reservation) {
+            $sum += (float) ($reservation['price'] ?? 0);
+        }
+        $amount = number_format($sum, 2, '.', '');
+        if ((float) $amount <= 0) {
+            throw new HttpException(422, 'Tuto rezervaci není potřeba platit.');
+        }
+        $priced = StripeFee::cover($amount);
+        try {
+            StripeGateway::fromConfig();
+        } catch (HttpException $e) {
+            foreach ($reservations as $reservation) {
+                $this->reservations->failPending($reservation);
+            }
+            throw $e;
+        }
+        $payment = $this->payments->createStripeHold($user, $priced['net'], (int) $reservations[0]['id'], $priced['fee'], $priced['charge']);
+        $this->payments->rememberMetadata((int) $payment['id'], [
+            'reservations' => array_values(array_map(
+                static fn (array $row): string => (string) ($row['public_id'] ?? ''),
+                $reservations
+            )),
+        ]);
+        return $app->absoluteUrl('/user/platba/' . rawurlencode((string) $payment['public_id']));
+    }
+
     public function startMembership(array $user, array $membership, Application $app): string
     {
         $amount = number_format((float) ($membership['price'] ?? 0), 2, '.', '');
@@ -92,9 +130,8 @@ final class CheckoutService
         }
         if ($type === 'checkout.session.expired' || $type === 'checkout.session.async_payment_failed') {
             $payment = $this->paymentFromSession($object);
-            if ($payment && $payment['status'] !== 'paid' && $payment['reservation_id']) {
-                $reservation = $this->reservations->findById((int) $payment['reservation_id']);
-                if ($reservation) {
+            if ($payment && $payment['status'] !== 'paid') {
+                foreach ($this->linkedReservations($payment) as $reservation) {
                     $this->reservations->failPending($reservation);
                 }
             }
@@ -117,9 +154,8 @@ final class CheckoutService
         if ($payment['status'] === 'paid') {
             return;
         }
-        if ($payment['reservation_id']) {
-            $reservation = $this->reservations->findById((int) $payment['reservation_id']);
-            if ($reservation && (int) $reservation['user_id'] === (int) $user['id']) {
+        foreach ($this->linkedReservations($payment) as $reservation) {
+            if ((int) $reservation['user_id'] === (int) $user['id']) {
                 $this->reservations->failPending($reservation);
             }
         }
@@ -362,13 +398,41 @@ final class CheckoutService
             (new MembershipService($this->db))->activatePurchase((int) $payment['membership_id']);
             (new MembershipAdminNotice($this->db))->send((int) $payment['id'], 'paid');
         }
-        $reservation = $payment['reservation_id'] ? $this->reservations->findById((int) $payment['reservation_id']) : null;
-        if (!$reservation) {
+        $linked = $this->linkedReservations($payment);
+        if ($linked === []) {
             return $this->payments->findByPublicId((string) $payment['public_id']) ?? $payment;
         }
-        $user = AuthService::make($this->db)->findById((int) $reservation['user_id']);
-        $this->reservations->confirmPending($reservation, $user ?: []);
+        $user = AuthService::make($this->db)->findById((int) $linked[0]['user_id']);
+        foreach ($linked as $reservation) {
+            $this->reservations->confirmPending($reservation, $user ?: []);
+        }
         return $this->payments->findByPublicId((string) $payment['public_id']) ?? $payment;
+    }
+
+    /** @param array<string, mixed> $payment @return list<array<string, mixed>> */
+    private function linkedReservations(array $payment): array
+    {
+        $rows = [];
+        $seen = [];
+        $push = function (?array $row) use (&$rows, &$seen): void {
+            if (!$row || isset($seen[(int) $row['id']])) {
+                return;
+            }
+            $seen[(int) $row['id']] = true;
+            $rows[] = $row;
+        };
+        if (!empty($payment['reservation_id'])) {
+            $push($this->reservations->findById((int) $payment['reservation_id']));
+        }
+        $meta = json_decode((string) ($payment['metadata_json'] ?? ''), true);
+        $ids = is_array($meta['reservations'] ?? null) ? $meta['reservations'] : [];
+        foreach ($ids as $publicId) {
+            if (!is_string($publicId) || $publicId === '') {
+                continue;
+            }
+            $push($this->reservations->find($publicId));
+        }
+        return $rows;
     }
 
     /** @param array<string, mixed> $payment @return array<string, mixed> */
@@ -402,8 +466,18 @@ final class CheckoutService
                 'doneMessage' => 'Platba prošla. Členství je na účtu a vstupy můžeš čerpat rezervací dne.',
             ];
         }
-        $reservation = $payment['reservation_id'] ? $this->reservations->findById((int) $payment['reservation_id']) : null;
-        $when = $reservation ? Clock::format((string) $reservation['starts_at'], 'j. n. Y H:i') . '–' . Clock::format((string) $reservation['ends_at'], 'H:i') : '';
+        $linked = $this->linkedReservations($payment);
+        $reservation = $linked[0] ?? null;
+        $when = '';
+        if (count($linked) > 1) {
+            $times = [];
+            foreach ($linked as $item) {
+                $times[] = Clock::format((string) $item['starts_at'], 'H:i') . '–' . Clock::format((string) $item['ends_at'], 'H:i');
+            }
+            $when = Clock::format((string) $linked[0]['starts_at'], 'j. n. Y') . ' · ' . implode(', ', $times);
+        } elseif ($reservation) {
+            $when = Clock::format((string) $reservation['starts_at'], 'j. n. Y H:i') . '–' . Clock::format((string) $reservation['ends_at'], 'H:i');
+        }
         $date = $reservation ? Clock::format((string) $reservation['starts_at'], 'j. n. Y') : '';
         $time = $reservation
             ? Clock::format((string) $reservation['starts_at'], 'H:i') . '–' . Clock::format((string) $reservation['ends_at'], 'H:i')

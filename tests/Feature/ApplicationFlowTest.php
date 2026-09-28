@@ -172,6 +172,53 @@ final class ApplicationFlowTest extends TestCase
         $this->assertSame('confirmed', $next['status']);
     }
 
+    public function testSplitSelectionKeepsARunAndASeparateSlot(): void
+    {
+        $user = $this->createVerifiedUser('split');
+        $day = Clock::nowLocal()->modify('+18 days')->setTime(11, 0);
+        $this->clearReservationWindow($day, 2, 10);
+        $service = ReservationService::make($this->db);
+        $availability = $service->availability($day->format('Y-m-d'));
+        $free = [];
+        foreach ($availability['slots'] as $slot) {
+            if (!empty($slot['available'])) {
+                $free[] = $day->format('Y-m-d') . ' ' . $slot['start'];
+            }
+        }
+        $block = (int) ($availability['block_minutes'] ?? 75);
+        $run = [];
+        $apart = null;
+        foreach ($free as $start) {
+            $at = new \DateTimeImmutable($start);
+            if ($run === []) {
+                $run = [$start];
+                continue;
+            }
+            $previous = new \DateTimeImmutable($run[count($run) - 1]);
+            $gap = ($at->getTimestamp() - $previous->getTimestamp()) / 60;
+            if (count($run) < 4) {
+                $run = $gap === $block ? [...$run, $start] : [$start];
+                continue;
+            }
+            if ($gap >= $block * 2) {
+                $apart = $start;
+                break;
+            }
+        }
+        if (count($run) < 4 || $apart === null) {
+            $this->markTestSkipped('Na vybraný den nejde složit čtyři okénka za sebou a jedno stranou.');
+        }
+        $picked = [...$run, $apart];
+        $created = $service->createMany($user, $picked, 1, null, true);
+        $this->assertCount(2, $created);
+        $this->assertSame('pending_payment', $created[0]['status']);
+        $this->assertSame('pending_payment', $created[1]['status']);
+        $firstStart = new \DateTimeImmutable($created[0]['starts_at']);
+        $firstEnd = new \DateTimeImmutable($created[0]['ends_at']);
+        $this->assertGreaterThan(60, ($firstEnd->getTimestamp() - $firstStart->getTimestamp()) / 60);
+        $this->assertGreaterThan($firstEnd->getTimestamp(), (new \DateTimeImmutable($created[1]['starts_at']))->getTimestamp());
+    }
+
     public function testPaidHoldConfirmsAfterCheckoutFulfillment(): void
     {
         $user = $this->createVerifiedUser('stripe');

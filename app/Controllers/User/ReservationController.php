@@ -83,27 +83,41 @@ final class ReservationController extends Controller
         $back = '/user/rezervace' . ($date !== '' ? '?date=' . rawurlencode($date) . $roomQuery : '');
         $duration = (int) $request->input('duration', 60);
         $pay = in_array((string) $request->input('pay', '0'), ['1', 'true', 'pay'], true);
+        $rawStarts = $request->input('starts', []);
+        $starts = is_array($rawStarts) ? $rawStarts : [];
         $membership = (new MembershipService($this->app->db()))->activeForUser((int) $user['id']);
         $unlimited = $membership && $membership['entries_remaining'] === null;
         try {
-            $reservation = $service->create(
-                $user,
-                $start,
-                $duration,
-                (int) $request->input('guests', 1),
-                $room ? (int) $room['id'] : null,
-                $pay
-            );
-            if (($reservation['status'] ?? '') === 'confirmed' || (float) ($reservation['price'] ?? 0) <= 0) {
-                $this->flashSuccess(!empty($reservation['membership_id'])
-                    ? $this->membershipBookedMessage(max(1, intdiv($duration, 60)), $unlimited)
-                    : 'Rezervace je potvrzená.');
+            $guestCount = (int) $request->input('guests', 1);
+            $roomId = $room ? (int) $room['id'] : null;
+            $created = $starts !== []
+                ? $service->createMany($user, $starts, $guestCount, $roomId, $pay)
+                : [$service->create($user, $start, $duration, $guestCount, $roomId, $pay)];
+            $needsPay = false;
+            $blocks = 0;
+            foreach ($created as $reservation) {
+                $blocks += $this->blocksOf($reservation);
+                if (($reservation['status'] ?? '') !== 'confirmed' && (float) ($reservation['price'] ?? 0) > 0) {
+                    $needsPay = true;
+                }
+            }
+            if (!$needsPay) {
+                $covered = false;
+                foreach ($created as $reservation) {
+                    if (!empty($reservation['membership_id'])) {
+                        $covered = true;
+                        break;
+                    }
+                }
+                $this->flashSuccess($covered
+                    ? $this->membershipBookedMessage(max(1, $blocks), $unlimited)
+                    : (count($created) > 1 ? 'Rezervace jsou potvrzené.' : 'Rezervace je potvrzená.'));
                 if ($request->wantsJson()) {
                     $this->jsonOk(['redirect' => $this->app->url($back)]);
                 }
                 $this->redirect($back);
             }
-            $url = CheckoutService::make($this->app->db())->start($user, $reservation, $this->app);
+            $url = CheckoutService::make($this->app->db())->startBundle($user, $created, $this->app);
             if ($request->wantsJson()) {
                 $this->jsonOk(['checkout_url' => $url]);
             }
@@ -249,6 +263,20 @@ final class ReservationController extends Controller
             ],
             'sections' => $sections,
         ]);
+    }
+
+    /** @param array<string, mixed> $reservation */
+    private function blocksOf(array $reservation): int
+    {
+        $start = new \DateTimeImmutable((string) $reservation['starts_at'], new \DateTimeZone('UTC'));
+        $end = new \DateTimeImmutable((string) $reservation['ends_at'], new \DateTimeZone('UTC'));
+        $minutes = (int) round(($end->getTimestamp() - $start->getTimestamp()) / 60);
+        $buffer = max(0, (int) ($reservation['buffer_minutes'] ?? 0));
+        $block = 60 + $buffer;
+        if ($block < 1) {
+            return 1;
+        }
+        return max(1, (int) round(($minutes + $buffer) / $block));
     }
 
     private function membershipBookedMessage(int $blocks, bool $unlimited): string

@@ -55,7 +55,6 @@
   };
 
   const step = () => Number(state.availability.duration_step_minutes || 60);
-  const minMinutes = () => Number(state.availability.min_minutes || 60);
   const maxMinutes = () => Number(state.availability.max_minutes || 1440);
   const maxHours = () => Math.max(1, Math.floor(maxMinutes() / step()));
   const maxPersons = () => Number(state.availability.max_persons || 2);
@@ -146,52 +145,68 @@
     if (count >= 2 && count <= 4) return "zbývají " + count + " vstupy";
     return "zbývá " + count + " vstupů";
   };
-  const availableFor = (slot) => (slot.available_for || []).map((item) => Number(item));
   const bookableRows = () => (state.availability.slots || []).filter((slot) => slot.kind !== "buffer");
   const blockMinutes = () => step() + buffer();
-  const occupyMinutes = (hours) => (hours || state.hours) * blockMinutes();
-  const occupyEnd = () => {
-    const first = state.selected[0];
-    if (!first) return "";
-    return addMinutesToTime(first.start, occupyMinutes());
-  };
   const minutes = (time) => timeToMinutes(time);
-  const inRange = (row) => {
-    const first = state.selected[0];
-    if (!first || row.kind === "buffer") return false;
-    const start = minutes(row.start);
-    return start >= minutes(first.start) && start < minutes(occupyEnd());
-  };
-  const hoursCovering = (row) => {
-    const first = state.selected[0];
-    if (!first || !row || row.kind === "buffer") return 0;
-    const delta = minutes(row.start) - minutes(first.start);
+  const isSelected = (row) => state.selected.some((item) => item.start === row.start);
+  const sortedSelected = () => [...state.selected].sort((a, b) => minutes(a.start) - minutes(b.start));
+  const selectionGroups = () => {
     const block = blockMinutes();
-    if (delta <= 0 || block < 1 || delta % block !== 0) return 0;
-    return delta / block + 1;
-  };
-  const extendHours = (row) => {
-    const target = hoursCovering(row);
-    const first = state.selected[0];
-    if (!first || target <= state.hours) return 0;
-    if (target > maxHours()) return 0;
-    if (!availableFor(first).includes(target * step())) return 0;
-    return target;
-  };
-  const maxSelectable = () => {
-    const first = state.selected[0];
-    if (!first) return 1;
-    let max = 1;
-    availableFor(first).forEach((minutesValue) => {
-      const hours = minutesValue / step();
-      if (hours > max && hours <= maxHours()) max = hours;
+    const groups = [];
+    sortedSelected().forEach((row) => {
+      const last = groups[groups.length - 1];
+      const previous = last ? last[last.length - 1] : null;
+      if (previous && minutes(row.start) === minutes(previous.start) + block) {
+        last.push(row);
+      } else {
+        groups.push([row]);
+      }
     });
-    return max;
+    return groups;
+  };
+  const runLengthIfAdded = (row) => {
+    const starts = new Set(state.selected.map((item) => minutes(item.start)));
+    starts.add(minutes(row.start));
+    const block = blockMinutes();
+    let length = 1;
+    let cursor = minutes(row.start) - block;
+    while (starts.has(cursor)) {
+      length += 1;
+      cursor -= block;
+    }
+    cursor = minutes(row.start) + block;
+    while (starts.has(cursor)) {
+      length += 1;
+      cursor += block;
+    }
+    return length;
+  };
+  const nextAfterLast = () => {
+    const rows = sortedSelected();
+    const last = rows[rows.length - 1];
+    if (!last) return null;
+    const target = addMinutesToTime(last.start, blockMinutes());
+    return bookableRows().find((row) => row.start === target && row.available && !isSelected(row)) || null;
+  };
+  const selectableFree = () => {
+    const block = blockMinutes();
+    const kept = [];
+    let run = 0;
+    let previous = null;
+    bookableRows().forEach((row) => {
+      if (!row.available) return;
+      const at = minutes(row.start);
+      if (previous !== null && at === previous + block) run += 1;
+      else run = 1;
+      if (run <= maxHours()) kept.push(row);
+      previous = at;
+    });
+    return kept;
   };
 
-  const setSelection = (rows, hours) => {
+  const setSelection = (rows) => {
     state.selected = rows;
-    state.hours = hours || (rows.length || 1);
+    state.hours = rows.length || 1;
     updateForm();
     renderHours();
     renderBar();
@@ -199,26 +214,13 @@
 
   const clickHour = (row) => {
     if (row.kind === "buffer") return;
-    const first = state.selected[0];
-    if (!first) {
-      if (!row.available) return;
-      setSelection([row], 1);
+    if (isSelected(row)) {
+      setSelection(state.selected.filter((item) => item.start !== row.start));
       return;
     }
-    if (row.start === first.start) {
-      setSelection(state.hours === 1 ? [] : [first], 1);
-      return;
-    }
-    const extra = extendHours(row);
-    if (extra > 0) {
-      setSelection([first], extra);
-      return;
-    }
-    if (inRange(row)) {
-      return;
-    }
-    if (!row.available) return;
-    setSelection([row], 1);
+    if (!row.available || row.past || row.mine) return;
+    if (runLengthIfAdded(row) > maxHours()) return;
+    setSelection([...state.selected, row]);
   };
 
   const timeToMinutes = (time) => {
@@ -226,21 +228,21 @@
     return h * 60 + m;
   };
 
-  const setHours = (count) => {
-    const first = state.selected[0];
-    if (!first) return;
-    const next = Math.max(1, Math.min(count, maxSelectable()));
-    if (!availableFor(first).includes(next * step())) return;
-    setSelection([first], next);
-  };
-
   const updateForm = () => {
-    const first = state.selected[0];
-    const duration = (first ? state.hours : 1) * step();
+    const rows = sortedSelected();
+    form?.querySelectorAll('[name="starts[]"]').forEach((input) => input.remove());
+    rows.forEach((row) => {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "starts[]";
+      input.value = state.date + " " + row.start;
+      form?.appendChild(input);
+    });
+    const first = rows[0];
     if (startInput) startInput.value = first ? state.date + " " + first.start : "";
-    if (durationInput) durationInput.value = String(duration || minMinutes());
+    if (durationInput) durationInput.value = String((rows.length || 1) * step());
     if (guestsInput) guestsInput.value = String(state.guests);
-    const ready = !!first;
+    const ready = rows.length > 0;
     if (confirmBtn) confirmBtn.disabled = !ready;
     if (payBtn) payBtn.disabled = !ready;
   };
@@ -248,8 +250,7 @@
   const hourState = (row) => {
     if (row.kind === "buffer") return "buffer";
     if (row.mine || row.kind === "mine") return "mine";
-    if (inRange(row)) return "selected";
-    if (extendHours(row) > 0) return "add";
+    if (isSelected(row)) return "selected";
     if (row.past || row.kind === "past") return "past";
     if (!row.available || row.kind === "busy") return "busy";
     return "free";
@@ -260,7 +261,6 @@
     if (kind === "past") return "Už bylo";
     if (kind === "busy") return "Obsazeno";
     if (kind === "selected") return "Vybrané";
-    if (kind === "add") return extendHours(row) === state.hours + 1 ? "Přidat okénko" : "Až sem";
     if (kind === "buffer") return "Úklid";
     return "Volné";
   };
@@ -276,7 +276,7 @@
       (disabled ? " disabled" : "") +
       ' aria-pressed="' + (selected ? "true" : "false") + '">' +
       '<span class="hour-time">' + row.start + "<small>" + row.end + "</small></span>" +
-      '<span class="hour-meta">' + hourMeta(row, kind) + (kind === "free" || kind === "selected" || kind === "add" ? " · " + money(rate()) : "") + "</span>" +
+      '<span class="hour-meta">' + hourMeta(row, kind) + (kind === "free" || kind === "selected" ? " · " + money(rate()) : "") + "</span>" +
       "</button>"
     );
   };
@@ -342,7 +342,7 @@
         hintEl.textContent = "Načítám volné hodiny…";
       } else {
         hintEl.textContent = free
-          ? "Každý blok je 1 h 15 min. Okének za sebou můžeš vybrat víc, klidně na celý volný den."
+          ? "Každý blok je 1 h 15 min. Okénka můžeš vybrat jakkoliv, i několik za sebou a další jinde."
           : "Na tenhle den už volný blok nezbývá.";
       }
     }
@@ -354,16 +354,20 @@
     bar.hidden = !on;
     bar.classList.toggle("is-on", on);
     if (!on) return;
-    const first = state.selected[0];
-    const end = occupyEnd();
-    const count = state.hours;
+    const groups = selectionGroups();
+    const count = state.selected.length;
     const price = rate() * count;
     const priced = cover(price);
     const priceLabel = priced.feeMinor > 0
       ? money(price) + " + poplatek evropské karty " + moneyMinor(priced.feeMinor)
       : money(price);
     const covered = canCover(count);
-    if (barTime) barTime.textContent = first.start + "–" + end;
+    if (barTime) {
+      barTime.textContent = groups.map((group) => {
+        const end = addMinutesToTime(group[group.length - 1].start, blockMinutes());
+        return group[0].start + "–" + end;
+      }).join(" · ");
+    }
     if (barMeta) {
       if (covered && unlimitedMembership) {
         barMeta.textContent = blocksWord(count) + " · neomezené členství, nebo " + priceLabel;
@@ -386,17 +390,19 @@
       payBtn.classList.toggle("btn-primary", !covered);
       payBtn.classList.toggle("btn-secondary", covered);
     }
-    const maxCount = maxSelectable();
+    const freeSlots = selectableFree();
+    const next = nextAfterLast();
     const countEl = bar.querySelector("[data-hours-count]");
     const minus = bar.querySelector("[data-hours-minus]");
     const plus = bar.querySelector("[data-hours-plus]");
     const all = bar.querySelector("[data-hours-all]");
     if (countEl) countEl.textContent = blocksWord(count);
-    if (minus) minus.disabled = count <= 1;
-    if (plus) plus.disabled = count >= maxCount;
+    if (minus) minus.disabled = count < 1;
+    if (plus) plus.disabled = !next || runLengthIfAdded(next) > maxHours();
     if (all) {
-      all.disabled = maxCount <= 1 || count >= maxCount;
-      all.classList.toggle("is-on", maxCount > 1 && count >= maxCount);
+      const full = freeSlots.length > 0 && count >= freeSlots.length;
+      all.disabled = freeSlots.length < 1 || full;
+      all.classList.toggle("is-on", full);
     }
   };
 
@@ -601,10 +607,19 @@
     loadDay(date);
   });
 
-  bar?.querySelector("[data-clear]")?.addEventListener("click", () => setSelection([], 1));
-  bar?.querySelector("[data-hours-minus]")?.addEventListener("click", () => setHours(state.hours - 1));
-  bar?.querySelector("[data-hours-plus]")?.addEventListener("click", () => setHours(state.hours + 1));
-  bar?.querySelector("[data-hours-all]")?.addEventListener("click", () => setHours(maxSelectable()));
+  bar?.querySelector("[data-clear]")?.addEventListener("click", () => setSelection([]));
+  bar?.querySelector("[data-hours-minus]")?.addEventListener("click", () => {
+    const rows = sortedSelected();
+    const last = rows[rows.length - 1];
+    if (!last) return;
+    setSelection(state.selected.filter((item) => item.start !== last.start));
+  });
+  bar?.querySelector("[data-hours-plus]")?.addEventListener("click", () => {
+    const next = nextAfterLast();
+    if (!next || runLengthIfAdded(next) > maxHours()) return;
+    setSelection([...state.selected, next]);
+  });
+  bar?.querySelector("[data-hours-all]")?.addEventListener("click", () => setSelection(selectableFree()));
   bar?.querySelector("[data-guest-minus]")?.addEventListener("click", () => {
     state.guests = Math.max(1, state.guests - 1);
     updateForm();
@@ -623,7 +638,7 @@
       return;
     }
     event.preventDefault();
-    const paying = event.submitter ? event.submitter.hasAttribute("data-pay") : !canCover(state.hours);
+    const paying = event.submitter ? event.submitter.hasAttribute("data-pay") : !canCover(state.selected.length);
     if (payInput) payInput.value = paying ? "1" : "0";
     if (confirmBtn) confirmBtn.disabled = true;
     if (payBtn) payBtn.disabled = true;

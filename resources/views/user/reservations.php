@@ -28,7 +28,7 @@ $payload = [
     <div>
         <p class="eyebrow">TVŮJ ČAS</p>
         <h1>Rezervace</h1>
-        <p class="muted">Otevři kalendář, vyber den a klikni na první okénko. Další přidáš tlačítkem nebo kliknutím dál v řadě, klidně až do konce dne. Každý blok zůstane 1 h 15 min.</p>
+        <p class="muted">Otevři kalendář, vyber den a klikni na okénka, která chceš. Můžou být čtyři za sebou a další klidně jinde. Každý blok zůstane 1 h 15 min.</p>
     </div>
     <a class="button" href="<?= e(url('/user/moje-rezervace')) ?>">Moje rezervace</a>
 </div>
@@ -121,7 +121,7 @@ $payload = [
         <div class="booker-hours-head">
             <div>
                 <h2>Hodiny</h2>
-                <p class="muted" data-hours-hint>Každý blok je hodina tréninku plus <?= (int) $buffer ?> min úklid. Okének za sebou můžeš vybrat víc, klidně na celý volný den.</p>
+                <p class="muted" data-hours-hint>Každý blok je hodina tréninku plus <?= (int) $buffer ?> min úklid. Okénka můžeš vybrat jakkoliv, i několik za sebou a další jinde.</p>
             </div>
             <p class="booker-price"><?= e(money_format_czk($hourly)) ?><span> / hod</span></p>
         </div>

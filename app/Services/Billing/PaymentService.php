@@ -123,6 +123,16 @@ final class PaymentService
         ]);
     }
 
+    /** @param array<string, mixed> $metadata */
+    public function rememberMetadata(int $paymentId, array $metadata): void
+    {
+        $this->paymentColumnSet();
+        $this->db->update('payments', [
+            'metadata_json' => json_encode($metadata, JSON_UNESCAPED_UNICODE),
+            'updated_at' => Clock::utc(),
+        ], 'id = :id', ['id' => $paymentId]);
+    }
+
     public function attachProviderReference(int $paymentId, string $reference): void
     {
         $this->db->update('payments', [

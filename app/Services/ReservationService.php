@@ -382,6 +382,94 @@ final class ReservationService
         }
     }
 
+    /**
+     * Každý čas je jedno okénko. Souvislá řada se sloučí do jedné rezervace,
+     * mezera mezi nimi založí další.
+     *
+     * @param list<string> $localStarts
+     * @return list<array<string, mixed>>
+     */
+    public function createMany(array $user, array $localStarts, int $guestCount, ?int $roomId = null, bool $paidCheckout = false): array
+    {
+        $parsed = [];
+        foreach ($localStarts as $value) {
+            $value = trim((string) $value);
+            if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $value)) {
+                throw new HttpException(422, 'Neplatný termín.');
+            }
+            $at = Clock::parseLocal($value);
+            $parsed[$at->format('Y-m-d H:i')] = $at;
+        }
+        if ($parsed === []) {
+            throw new HttpException(422, 'Vyber alespoň jedno okénko.');
+        }
+        if (count($parsed) > 48) {
+            throw new HttpException(422, 'Najednou jde vybrat nejvýš 48 okének.');
+        }
+        uasort($parsed, static fn (\DateTimeImmutable $a, \DateTimeImmutable $b): int => $a <=> $b);
+
+        $step = $this->durationStep();
+        $block = $step + $this->bufferMinutes();
+        $groups = [];
+        $current = null;
+        foreach ($parsed as $at) {
+            if ($current !== null && $current['next']->format('Y-m-d H:i') === $at->format('Y-m-d H:i')) {
+                $current['blocks']++;
+                $current['next'] = $at->modify('+' . $block . ' minutes');
+                continue;
+            }
+            if ($current !== null) {
+                $groups[] = $current;
+            }
+            $current = [
+                'start' => $at->format('Y-m-d H:i'),
+                'next' => $at->modify('+' . $block . ' minutes'),
+                'blocks' => 1,
+            ];
+        }
+        if ($current !== null) {
+            $groups[] = $current;
+        }
+
+        if (!$paidCheckout) {
+            $total = 0;
+            foreach ($groups as $group) {
+                $total += $group['blocks'];
+            }
+            $membership = $this->memberships->activeForUser((int) $user['id']);
+            if (!$this->memberships->coversBooking($membership, $total)) {
+                throw new HttpException(422, $this->memberships->coversBooking($membership, 1)
+                    ? 'Na ' . $this->blocksPhrase($total) . ' nemáš dost vstupů. Můžeš termín zaplatit.'
+                    : 'Rezervaci je potřeba zaplatit.');
+            }
+        }
+
+        $created = [];
+        $ignore = [];
+        try {
+            foreach ($groups as $group) {
+                $reservation = $this->create(
+                    $user,
+                    $group['start'],
+                    $group['blocks'] * $step,
+                    $guestCount,
+                    $roomId,
+                    $paidCheckout,
+                    $ignore
+                );
+                $ignore[] = (int) $reservation['id'];
+                $created[] = $reservation;
+            }
+        } catch (\Throwable $e) {
+            foreach (array_reverse($created) as $reservation) {
+                $this->undoFresh($user, $reservation);
+            }
+            throw $e;
+        }
+
+        return $created;
+    }
+
     public function cancel(array $user, string $publicId, bool $admin = false, ?string $reason = null): string
     {
         $reservation = $this->owned($user, $publicId, $admin);
@@ -1253,6 +1341,44 @@ final class ReservationService
         }
         $this->touchLive();
         return $fresh;
+    }
+
+    /** Vrátí čerstvě založenou rezervaci, když se zbytek výběru nepodaří dokončit. */
+    private function undoFresh(array $user, array $reservation): void
+    {
+        if (($reservation['status'] ?? '') === 'pending_payment') {
+            $this->failPending($reservation);
+            return;
+        }
+        if (($reservation['status'] ?? '') !== 'confirmed') {
+            return;
+        }
+        $this->db->update('reservations', [
+            'status' => 'cancelled',
+            'cancellation_reason' => 'Výběr se nepodařilo dokončit.',
+            'cancelled_at' => Clock::utc(),
+            'cancelled_by' => (int) ($user['id'] ?? 0) ?: null,
+            'updated_at' => Clock::utc(),
+        ], 'id = :id AND status = :status', [
+            'id' => (int) $reservation['id'],
+            'status' => 'confirmed',
+        ]);
+        $this->releaseOccupancy((int) $reservation['id']);
+        if (!empty($reservation['membership_id']) && (float) ($reservation['price'] ?? 0) <= 0) {
+            try {
+                $this->memberships->restoreEntry(
+                    (int) $reservation['membership_id'],
+                    (int) ($user['id'] ?? 0) ?: null,
+                    $this->entryBlocksFromReservation($reservation)
+                );
+            } catch (\Throwable) {
+            }
+        }
+        try {
+            $this->db->query('DELETE FROM access_permissions WHERE reservation_id = :id', ['id' => (int) $reservation['id']]);
+        } catch (\Throwable) {
+        }
+        $this->touchLive();
     }
 
     public function failPending(array $reservation): void
